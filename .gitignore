@@ -4,7 +4,4 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
-data/edges.json
-data/nodes.json
-data/cache.json
-data/progress.json
+data/

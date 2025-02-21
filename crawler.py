@@ -171,8 +171,11 @@ class GraphManager:
             edge_data['section_link'] = section_link
         self.edges[edge] = edge_data
     
-    def export_graph(self):
+    def export_graph(self, progress_callback=None):
         """Export the graph in the format needed for visualization."""
+        if progress_callback:
+            progress_callback("Starting export", 0)
+        
         # Helper function to determine node category
         def get_node_category(title: str, depth: int) -> str:
             if title == "Architecture":
@@ -186,12 +189,21 @@ class GraphManager:
             return "architecture" if is_architecture else "related"
 
         # Calculate depths using BFS
+        if progress_callback:
+            progress_callback("Calculating node depths", 0)
+            
         depths = {"Architecture": 0}
         queue = [("Architecture", 0)]
         visited = {"Architecture"}
+        nodes_processed = 0
+        total_nodes = len(self.nodes)
 
         while queue:
             current, depth = queue.pop(0)
+            nodes_processed += 1
+            if progress_callback and nodes_processed % 100 == 0:
+                progress_callback("Calculating node depths", nodes_processed, total_nodes)
+                
             for edge in self.edges.values():
                 if edge["source"] == current and edge["target"] not in visited:
                     depths[edge["target"]] = depth + 1
@@ -202,6 +214,11 @@ class GraphManager:
                     queue.append((edge["source"], depth + 1))
                     visited.add(edge["source"])
 
+        if progress_callback:
+            progress_callback("Preparing nodes for export", 0)
+            
+        # Transform nodes
+        nodes_processed = 0
         graph_data = {
             "nodes": [
                 {
@@ -216,21 +233,36 @@ class GraphManager:
                     "categories": data["categories"]
                 } for title, data in self.nodes.items()
             ],
-            "links": [
-                {
-                    "source": data["source"],
-                    "target": data["target"],
-                    "value": 1,  # Default value, can be modified based on context
-                    "section_context": data.get("section_context", ""),
-                    "sentence_context": data.get("sentence_context", ""),
-                    **({k: v for k, v in data.items() if k not in ["source", "target", "section_context", "sentence_context"]})
-                } for data in self.edges.values()
-            ]
+            "links": []
         }
         
+        if progress_callback:
+            progress_callback("Processing edges", 0)
+            
+        # Transform edges
+        edges_processed = 0
+        total_edges = len(self.edges)
+        
+        graph_data["links"] = [
+            {
+                "source": data["source"],
+                "target": data["target"],
+                "value": 1,  # Default value, can be modified based on context
+                "section_context": data.get("section_context", ""),
+                "sentence_context": data.get("sentence_context", ""),
+                **({k: v for k, v in data.items() if k not in ["source", "target", "section_context", "sentence_context"]})
+            } for data in self.edges.values()
+        ]
+        
+        if progress_callback:
+            progress_callback("Saving to file", 0)
+            
         # Save to file
         with open(GRAPH_FILE, 'w', encoding='utf-8') as f:
             json.dump(graph_data, f, ensure_ascii=False, indent=2)
+            
+        if progress_callback:
+            progress_callback("Export completed", total_edges)
 
 def get_canonical_title(wiki: wikipediaapi.Wikipedia, title: str) -> str:
     """Get the canonical title for a Wikipedia page to handle redirects."""
