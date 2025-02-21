@@ -192,16 +192,16 @@ export default function Home() {
           .data(graphData.links)
           .join('line')
           .attr('stroke', d => {
-            const source = d.source as unknown as Node;
-            const target = d.target as unknown as Node;
+            const source = d.source as Node;
+            const target = d.target as Node;
             // Use gradient for links between different categories
             return source.category === target.category ? 
               'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.5)';
           })
           .attr('stroke-opacity', 0.6)
           .attr('stroke-width', d => {
-            const source = d.source as unknown as Node;
-            const target = d.target as unknown as Node;
+            const source = d.source as Node;
+            const target = d.target as Node;
             // Thicker lines for architecture-related connections
             return (source.category === 'architecture' || target.category === 'architecture') ? 2 : 1;
           });
