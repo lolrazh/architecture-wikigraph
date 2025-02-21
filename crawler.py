@@ -9,12 +9,44 @@ from urllib.parse import unquote, urlencode
 from typing import Set, Dict, List, Tuple
 import time
 from functools import partial
+import os
 
 # Set logging to DEBUG level to see more details
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+
+# Sections to exclude from processing
+unwanted_sections = {
+    'references', 'notes', 'citations', 'sources', 'footnotes',
+    'works cited', 'external links', 'further reading',
+    'bibliography', 'see also', 'notes and references',
+    'additional resources', 'external resources'
+}
+
+# Data storage paths
+DATA_DIR = 'data'
+NODES_FILE = os.path.join(DATA_DIR, 'nodes.json')
+EDGES_FILE = os.path.join(DATA_DIR, 'edges.json')
+CACHE_FILE = os.path.join(DATA_DIR, 'cache.json')
+PROGRESS_FILE = os.path.join(DATA_DIR, 'progress.json')
+GRAPH_FILE = 'public/graph.json'
+
+# Ensure data directory exists
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def is_architecture_related(title: str) -> bool:
+    """Check if a title is directly related to architecture."""
+    architecture_keywords = {
+        'architecture', 'building', 'construction', 'design', 'structure',
+        'architectural', 'architect', 'built environment', 'edifice',
+        'engineering', 'facade', 'interior', 'landscape', 'planning',
+        'renovation', 'restoration', 'style', 'urban'
+    }
+    
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in architecture_keywords)
 
 def is_valid_link(title):
     """Check if a link should be included in the graph."""
@@ -58,6 +90,148 @@ def is_valid_link(title):
         
     return True
 
+class GraphManager:
+    def __init__(self):
+        self.nodes = {}  # title -> node data
+        self.edges = {}  # (source, target) -> edge data
+        self.cache = {}  # title -> {links, timestamp}
+        self.progress = {
+            'last_processed': None,
+            'to_visit': [],
+            'visited': set()
+        }
+        
+        # Load existing data if available
+        self.load_data()
+    
+    def load_data(self):
+        """Load existing data from files."""
+        if os.path.exists(NODES_FILE):
+            with open(NODES_FILE, 'r', encoding='utf-8') as f:
+                self.nodes = json.load(f)
+        
+        if os.path.exists(EDGES_FILE):
+            with open(EDGES_FILE, 'r', encoding='utf-8') as f:
+                # Convert string tuple keys back to actual tuples
+                self.edges = {tuple(eval(k)): v for k, v in json.load(f).items()}
+        
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                self.cache = json.load(f)
+        
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.progress['last_processed'] = data['last_processed']
+                self.progress['to_visit'] = data['to_visit']
+                self.progress['visited'] = set(data['visited'])
+    
+    def save_data(self):
+        """Save current data to files."""
+        with open(NODES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.nodes, f, ensure_ascii=False, indent=2)
+        
+        with open(EDGES_FILE, 'w', encoding='utf-8') as f:
+            # Convert tuple keys to strings for JSON serialization
+            edges_dict = {str(list(k)): v for k, v in self.edges.items()}
+            json.dump(edges_dict, f, ensure_ascii=False, indent=2)
+        
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.cache, f, ensure_ascii=False, indent=2)
+        
+        with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
+            progress_data = {
+                'last_processed': self.progress['last_processed'],
+                'to_visit': self.progress['to_visit'],
+                'visited': list(self.progress['visited'])
+            }
+            json.dump(progress_data, f, ensure_ascii=False, indent=2)
+    
+    def add_node(self, title: str, first_paragraph: str = "", sections: List[str] = None, categories: List[str] = None, is_disambiguation: bool = False):
+        """Add a node to the graph with complete metadata."""
+        if title not in self.nodes:
+            self.nodes[title] = {
+                'title': title,
+                'first_paragraph': first_paragraph,
+                'sections': sections or [],
+                'categories': categories or [],
+                'is_disambiguation': is_disambiguation
+            }
+    
+    def add_edge(self, source: str, target: str, section_context: str = "", sentence_context: str = "", section_link: Dict = None):
+        """Add an edge to the graph with context information."""
+        edge = tuple(sorted([source, target]))
+        edge_data = {
+            'source': source,
+            'target': target,
+            'section_context': section_context,
+            'sentence_context': sentence_context
+        }
+        if section_link:
+            edge_data['section_link'] = section_link
+        self.edges[edge] = edge_data
+    
+    def export_graph(self):
+        """Export the graph in the format needed for visualization."""
+        # Helper function to determine node category
+        def get_node_category(title: str, depth: int) -> str:
+            if title == "Architecture":
+                return "root"
+            # Check if the title or categories suggest it's architecture-related
+            node_data = self.nodes[title]
+            is_architecture = (
+                is_architecture_related(title) or
+                any(is_architecture_related(cat) for cat in node_data['categories'])
+            )
+            return "architecture" if is_architecture else "related"
+
+        # Calculate depths using BFS
+        depths = {"Architecture": 0}
+        queue = [("Architecture", 0)]
+        visited = {"Architecture"}
+
+        while queue:
+            current, depth = queue.pop(0)
+            for edge in self.edges.values():
+                if edge["source"] == current and edge["target"] not in visited:
+                    depths[edge["target"]] = depth + 1
+                    queue.append((edge["target"], depth + 1))
+                    visited.add(edge["target"])
+                elif edge["target"] == current and edge["source"] not in visited:
+                    depths[edge["source"]] = depth + 1
+                    queue.append((edge["source"], depth + 1))
+                    visited.add(edge["source"])
+
+        graph_data = {
+            "nodes": [
+                {
+                    "id": title,
+                    "depth": depths.get(title, float('inf')),
+                    "category": get_node_category(title, depths.get(title, float('inf'))),
+                    "group": 1,  # Default group, can be modified based on categories if needed
+                    # Include original metadata for potential hover/click interactions
+                    "title": data["title"],
+                    "first_paragraph": data["first_paragraph"],
+                    "sections": data["sections"],
+                    "categories": data["categories"]
+                } for title, data in self.nodes.items()
+            ],
+            "links": [
+                {
+                    "source": data["source"],
+                    "target": data["target"],
+                    "value": 1,  # Default value, can be modified based on context
+                    "section_context": data.get("section_context", ""),
+                    "sentence_context": data.get("sentence_context", ""),
+                    **({k: v for k, v in data.items() if k not in ["source", "target", "section_context", "sentence_context"]})
+                } for data in self.edges.values()
+            ]
+        }
+        
+        # Save to file
+        with open(GRAPH_FILE, 'w', encoding='utf-8') as f:
+            json.dump(graph_data, f, ensure_ascii=False, indent=2)
+
 def get_canonical_title(wiki: wikipediaapi.Wikipedia, title: str) -> str:
     """Get the canonical title for a Wikipedia page to handle redirects."""
     page = wiki.page(title)
@@ -76,181 +250,238 @@ async def get_canonical_title_async(wiki: wikipediaapi.Wikipedia, title: str) ->
     )
     return canonical
 
-async def get_main_content_links_async(session: aiohttp.ClientSession, page_title: str) -> Set[str]:
-    """Async version of get_main_content_links."""
+async def get_page_metadata(soup: BeautifulSoup) -> Dict:
+    """Extract page metadata including first paragraph and sections."""
+    metadata = {
+        'first_paragraph': '',
+        'sections': [],
+        'categories': [],
+        'is_disambiguation': False
+    }
+    
+    # Check if it's a disambiguation page
+    if soup.find('table', id='disambigbox') or soup.find('div', {'class': 'disambiguation'}):
+        metadata['is_disambiguation'] = True
+        return metadata
+    
+    # Get first paragraph (lead section)
+    lead_section = soup.find('div', {'class': 'mw-parser-output'})
+    if lead_section:
+        paragraphs = lead_section.find_all('p', recursive=False)
+        for p in paragraphs:
+            if p.text.strip() and not p.find_parent(['table', 'div'], class_=['infobox', 'sidebar']):
+                metadata['first_paragraph'] = p.text.strip()
+                break
+    
+    # Get section hierarchy
+    for heading in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+        if heading.get('id') != 'firstHeading':  # Skip page title
+            section_text = heading.get_text().strip()
+            if section_text.lower() not in unwanted_sections:
+                metadata['sections'].append(section_text)
+    
+    # Get categories
+    for cat in soup.find_all('div', {'class': 'mw-normal-catlinks'}):
+        for link in cat.find_all('a'):
+            category = link.text.strip()
+            if category.startswith('Category:'):
+                category = category[9:]  # Remove 'Category:' prefix
+            metadata['categories'].append(category)
+    
+    return metadata
+
+async def get_main_content_links_async(session: aiohttp.ClientSession, page_title: str) -> Tuple[List[Dict], Dict]:
+    """Async version of get_main_content_links with enhanced metadata and link context."""
     logging.debug(f"Starting to fetch links for page: {page_title}")
-    # Properly encode the URL for Wikipedia
     encoded_title = page_title.replace(' ', '_')
     url = f'https://en.wikipedia.org/wiki/{encoded_title}'
+    
     try:
-        logging.debug(f"Making HTTP request to: {url}")
-        headers = {
-            'User-Agent': 'ArchitectureWikigraph/1.0 (https://github.com/yourusername/architecture-wikigraph)',
+        async with session.get(url, headers={
+            'User-Agent': 'ArchitectureWikigraph/1.0',
             'Accept': 'text/html'
-        }
-        async with session.get(url, headers=headers) as response:
-            logging.debug(f"Got response for {url} with status: {response.status}")
+        }) as response:
             if response.status != 200:
-                logging.error(f"Error fetching {url}: HTTP {response.status}")
-                logging.error(f"Response headers: {response.headers}")
-                return set()
-                
+                return [], {}
+            
             html = await response.text()
-            logging.debug(f"Successfully fetched HTML content for {page_title} (length: {len(html)})")
+            if len(html) < 100:
+                return [], {}
             
-            if len(html) < 100:  # Suspiciously small response
-                logging.warning(f"Received suspiciously small HTML response for {page_title} (length: {len(html)})")
-                logging.debug(f"Response content: {html}")
-                return set()
-                
             soup = BeautifulSoup(html, 'html.parser')
-            logging.debug(f"Created BeautifulSoup parser for {page_title}")
             
-            # Find the main content div
+            # Get page metadata
+            metadata = await get_page_metadata(soup)
+            if metadata['is_disambiguation']:
+                return [], metadata
+            
             content = soup.find(id='mw-content-text')
             if not content:
-                logging.warning(f"Could not find main content div for {page_title}")
-                return set()
-
-            logging.debug(f"Found main content div for {page_title}")
-            # First, find and remove all reference tags
-            ref_tags = content.find_all('ref')
-            for ref in ref_tags:
-                ref.decompose()
+                return [], metadata
             
-            # Find and remove reference sections and other non-main content
-            reference_sections = content.find_all(['div', 'span', 'section'], 
-                class_=['reflist', 'reference', 'references', 'mw-references-wrap', 'reference-text'])
-            for section in reference_sections:
-                section.decompose()
-
-            # Remove sections with reference-related headings
-            for heading in content.find_all(['h2', 'h3']):
-                heading_text = heading.get_text().strip().lower()
-                if heading_text in ['references', 'notes', 'citations', 'sources', 'footnotes', 'works cited']:
-                    section = heading.find_next_sibling()
-                    while section and section.name not in ['h2', 'h3']:
-                        next_elem = section.find_next_sibling()
-                        section.decompose()
-                        section = next_elem
-                    heading.decompose()
-
-            # Get all links from the cleaned main content
-            main_links = set()
-            for link in content.find_all('a'):
-                if link.find_parent(['table', 'div'], class_=['navbox', 'reflist', 'reference', 
-                                                         'references', 'mw-references-wrap', 'reference-text']):
+            # Clean up content
+            for tag in content.find_all(['ref', 'style', 'script']):
+                tag.decompose()
+            
+            # Process links with context
+            links_with_context = []  # Changed from set to list
+            current_section = "Introduction"
+            
+            for element in content.find_all(['h2', 'h3', 'a', 'p']):
+                # Update current section
+                if element.name in ['h2', 'h3']:
+                    current_section = element.get_text().strip()
+                    if current_section.lower() in unwanted_sections:
+                        current_section = None
                     continue
-                    
-                href = link.get('href', '')
-                if not href.startswith('/wiki/'):
-                    continue
-                    
-                title = unquote(href[6:]).replace('_', ' ')
                 
-                if '#' in title:
-                    title = title.split('#')[0]
+                # Skip if we're in an unwanted section
+                if not current_section:
+                    continue
+                
+                # Process links
+                if element.name == 'a':
+                    href = element.get('href', '')
+                    if not href.startswith('/wiki/'):
+                        continue
                     
-                if title and is_valid_link(title):
-                    main_links.add(title)
+                    # Get link title and section
+                    full_href = href[6:]  # Remove /wiki/
+                    base_title = unquote(full_href.split('#')[0]).replace('_', ' ')
+                    section_name = unquote(full_href.split('#')[1]) if '#' in full_href else None
                     
-            return main_links
+                    if not base_title or not is_valid_link(base_title):
+                        continue
+                    
+                    # Get sentence context
+                    parent_p = element.find_parent('p')
+                    sentence_context = ''
+                    if parent_p:
+                        text = parent_p.get_text()
+                        sentences = text.split('. ')
+                        for sentence in sentences:
+                            if element.get_text() in sentence:
+                                sentence_context = sentence.strip()
+                                break
+                    
+                    link_data = {
+                        'title': base_title,
+                        'section_context': current_section,
+                        'sentence_context': sentence_context
+                    }
+                    
+                    if section_name:
+                        link_data['section_link'] = {
+                            'parent_page': base_title,
+                            'section_name': section_name,
+                            'full_url': full_href
+                        }
+                    
+                    links_with_context.append(link_data)  # Changed from add to append
+            
+            return links_with_context, metadata
+            
     except Exception as e:
-        logging.error(f"Error fetching {url}: {str(e)}")
-        import traceback
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        return set()
+        logging.error(f"Error processing {url}: {str(e)}")
+        return [], {}
 
 async def process_page(
     session: aiohttp.ClientSession,
     wiki: wikipediaapi.Wikipedia,
     current_title: str,
     current_depth: int,
-    canonical_mapping: Dict[str, str],
-    visited: Dict[str, int],
-    nodes_at_depth: Dict[int, List[str]],
-    edges: Dict[Tuple[str, str], int],
-    MAX_DEPTH: int
+    graph_manager: GraphManager,
+    canonical_mapping: Dict[str, str]
 ) -> List[Tuple[str, int]]:
     """Process a single page asynchronously."""
     try:
-        logging.debug(f"Enter process_page for {current_title} at depth {current_depth}")
+        logging.debug(f"Processing {current_title} at depth {current_depth}")
         
-        if current_depth >= MAX_DEPTH:
-            logging.debug(f"Skipping {current_title} - reached max depth {MAX_DEPTH}")
+        # Get links and metadata from current page
+        page_links, metadata = await get_main_content_links_async(session, current_title)
+        
+        # Initialize metadata if empty
+        if not metadata:
+            metadata = {
+                'first_paragraph': '',
+                'sections': [],
+                'categories': [],
+                'is_disambiguation': False
+            }
+        
+        if metadata.get('is_disambiguation', False):
+            logging.info(f"Skipping disambiguation page: {current_title}")
             return []
-
-        logging.info(f"Processing {current_title} at depth {current_depth}")
         
-        # Get links from current page
-        logging.debug(f"Fetching links for {current_title}")
-        page_links = await get_main_content_links_async(session, current_title)
-        logging.info(f"Found {len(page_links)} links on page {current_title}")
+        # Add current page as node with metadata
+        graph_manager.add_node(
+            title=current_title,
+            first_paragraph=metadata.get('first_paragraph', ''),
+            sections=metadata.get('sections', []),
+            categories=metadata.get('categories', []),
+            is_disambiguation=metadata.get('is_disambiguation', False)
+        )
         
         if not page_links:
             logging.warning(f"No links found on page {current_title}")
             return []
-            
-        # Process links in parallel batches
-        connection_counts = {}
-        canonical_tasks = []
         
-        # Create tasks for getting canonical titles
-        for title in page_links:
-            if title not in canonical_mapping:
-                task = get_canonical_title_async(wiki, title)
-                canonical_tasks.append((title, task))
+        # Process links in parallel batches
+        canonical_tasks = []
+        for link_data in page_links:
+            if link_data['title'] not in canonical_mapping:
+                task = get_canonical_title_async(wiki, link_data['title'])
+                canonical_tasks.append((link_data, task))
         
         # Execute canonical title tasks in parallel
         if canonical_tasks:
             results = await asyncio.gather(*[task for _, task in canonical_tasks], return_exceptions=True)
-            for (title, _), result in zip(canonical_tasks, results):
+            for (link_data, _), result in zip(canonical_tasks, results):
                 if isinstance(result, Exception):
-                    logging.error(f"Error getting canonical title for {title}: {str(result)}")
+                    logging.error(f"Error getting canonical title for {link_data['title']}")
                     continue
-                canonical_mapping[title] = result
-                if result not in connection_counts:
-                    connection_counts[result] = 0
-                connection_counts[result] += 1
+                canonical_mapping[link_data['title']] = result
         
-        # Process remaining links that were already in canonical_mapping
-        for title in page_links:
-            if title in canonical_mapping and title not in connection_counts:
-                canonical = canonical_mapping[title]
-                if canonical not in connection_counts:
-                    connection_counts[canonical] = 0
-                connection_counts[canonical] += 1
-        
-        # Sort and filter links by connection count
-        logging.debug("Sorting and filtering links")
-        sorted_links = sorted(
-            [(title, connection_counts.get(canonical_mapping[title], 0)) 
-             for title in page_links 
-             if title in canonical_mapping],
-            key=lambda x: x[1],
-            reverse=True
-        )
-        logging.debug(f"Sorted {len(sorted_links)} valid links")
-        
+        # Process all links and create edges
         to_visit = []
-        # Process all valid links
-        for title, count in sorted_links:
-            canonical = canonical_mapping[title]
-            next_depth = current_depth + 1
-                
-            if canonical not in visited and next_depth < MAX_DEPTH:
-                to_visit.append((canonical, next_depth))
-                nodes_at_depth[next_depth].append(canonical)
-                logging.debug(f"Added {canonical} to visit at depth {next_depth}")
+        processed_links = set()
+        
+        for link_data in page_links:
+            original_title = link_data['title']
+            if original_title not in canonical_mapping:
+                continue
             
-            # Handle edge (create or increment weight)
-            edge_pair = tuple(sorted([current_title, canonical]))
-            if edge_pair in edges:
-                edges[edge_pair] += 1
-            else:
-                edges[edge_pair] = 1
-                
-        logging.debug(f"Returning {len(to_visit)} new pages to visit")
+            canonical = canonical_mapping[original_title]
+            next_depth = current_depth + 1
+            
+            # Skip self-links and already processed links
+            edge_key = tuple(sorted([current_title, canonical]))
+            if canonical == current_title or edge_key in processed_links:
+                continue
+            
+            # Add edge with context
+            graph_manager.add_edge(
+                source=current_title,
+                target=canonical,
+                section_context=link_data['section_context'],
+                sentence_context=link_data['sentence_context'],
+                section_link=link_data.get('section_link')
+            )
+            
+            # Mark this link as processed
+            processed_links.add(edge_key)
+            
+            # Add to visit queue if not visited and not a disambiguation page
+            if canonical not in graph_manager.progress['visited']:
+                to_visit.append((canonical, next_depth))
+                logging.debug(f"Added {canonical} to visit at depth {next_depth}")
+        
+        # Mark current page as visited
+        graph_manager.progress['visited'].add(current_title)
+        
+        # Save progress periodically
+        graph_manager.save_data()
+        
         return to_visit
     except Exception as e:
         logging.error(f"Error processing page {current_title}: {str(e)}")
@@ -262,7 +493,7 @@ async def main_async():
     start_time = time.time()
     logging.info("Starting crawler")
     
-    # Initialize Wikipedia API with proper user agent
+    # Initialize Wikipedia API
     wiki = wikipediaapi.Wikipedia(
         language='en',
         extract_format=wikipediaapi.ExtractFormat.WIKI,
@@ -270,120 +501,69 @@ async def main_async():
     )
     logging.debug("Initialized Wikipedia API")
 
-    MAX_DEPTH = 2
-    CONCURRENT_REQUESTS = 20  # Increased from 5 to 20 concurrent requests
-    RATE_LIMIT_DELAY = 0.1  # 100ms delay between requests instead of 1s
+    CONCURRENT_REQUESTS = 20
+    RATE_LIMIT_DELAY = 0.1
 
-    # Initialize graph structure
-    graph = {
-        "nodes": set(),  # Use sets for efficient membership testing
-        "links": set()   # Use sets to avoid duplicates
-    }
+    # Initialize graph manager
+    graph_manager = GraphManager()
     
-    # Add root node
-    graph["nodes"].add("Architecture")
+    # Add root node if not exists
+    graph_manager.add_node("Architecture")
 
     # Initialize tracking structures
-    visited = {}  # Don't mark Architecture as visited yet
-    to_visit = [("Architecture", 0)]
     canonical_mapping = {}
-    edges = {}
-    nodes_at_depth = {0: ["Architecture"], 1: [], 2: []}
-    
-    logging.debug("Initialized data structures")
-    
-    # Create client session with custom timeout and headers
-    timeout = aiohttp.ClientTimeout(total=30)  # 30 seconds total timeout
-    connector = aiohttp.TCPConnector(limit=CONCURRENT_REQUESTS, force_close=True)
+    to_visit = graph_manager.progress['to_visit'] or [("Architecture", 0)]
     
     logging.debug("Starting main processing loop")
-    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+    async with aiohttp.ClientSession() as session:
         while to_visit:
             current_batch = to_visit[:CONCURRENT_REQUESTS]
             to_visit = to_visit[CONCURRENT_REQUESTS:]
             
-            logging.debug(f"Processing batch of {len(current_batch)} pages: {current_batch}")
+            logging.debug(f"Processing batch of {len(current_batch)} pages")
             
             # Create and execute tasks for current batch
             tasks = []
             for title, depth in current_batch:
-                if title not in visited:
+                if title not in graph_manager.progress['visited']:
                     task = process_page(
-                        session, wiki, title, depth, canonical_mapping,
-                        visited, nodes_at_depth, edges,
-                        MAX_DEPTH
+                        session, wiki, title, depth,
+                        graph_manager, canonical_mapping
                     )
                     tasks.append((title, depth, task))
                 else:
                     logging.debug(f"Skipping {title} - already visited")
             
-            # Execute all tasks in parallel and wait for completion
+            # Execute all tasks in parallel
             if tasks:
                 try:
-                    logging.debug(f"Starting execution of {len(tasks)} tasks")
                     results = await asyncio.gather(*[task for _, _, task in tasks], return_exceptions=True)
-                    logging.debug(f"Completed execution of {len(tasks)} tasks")
                     
-                    # Process results and mark pages as visited only after successful processing
-                    for i, ((title, depth, _), result) in enumerate(zip(tasks, results)):
+                    # Process results
+                    for ((title, depth, _), result) in zip(tasks, results):
                         if isinstance(result, Exception):
-                            logging.error(f"Task {i} ({title}) failed: {str(result)}")
-                            import traceback
-                            logging.error(f"Traceback: {traceback.format_exc()}")
+                            logging.error(f"Task for {title} failed")
                         else:
-                            # Mark as visited only after successful processing
-                            visited[title] = depth
-                            # Add the source node to the graph
-                            graph["nodes"].add(title)
-                            logging.debug(f"Marked {title} as visited at depth {depth}")
-                            if result:  # Only extend if we got actual results
+                            if result:
                                 to_visit.extend(result)
-                                logging.debug(f"Added {len(result)} new pages to visit queue from task {i} ({title})")
                 except Exception as e:
                     logging.error(f"Error processing batch: {str(e)}")
-                    import traceback
-                    logging.error(f"Traceback: {traceback.format_exc()}")
-            else:
-                logging.debug("No tasks created for current batch")
             
-            # Add a small delay between batches to respect rate limits
+            # Update progress
+            graph_manager.progress['to_visit'] = to_visit
+            graph_manager.save_data()
+            
+            # Add a small delay between batches
             await asyncio.sleep(RATE_LIMIT_DELAY)
 
-    # Convert sets to lists and create final graph structure
-    final_graph = {
-        "nodes": [{"id": node, "group": visited.get(node, 0) + 1} for node in graph["nodes"]],
-        "links": []
-    }
-
-    # Add edges only if both nodes exist
-    for (source, target), weight in edges.items():
-        if source in graph["nodes"] and target in graph["nodes"]:
-            final_graph["links"].append({
-                "source": source,
-                "target": target,
-                "value": weight
-            })
+    # Export final graph
+    graph_manager.export_graph()
 
     # Log statistics
     end_time = time.time()
     logging.info(f"\nCrawling completed in {end_time - start_time:.2f} seconds")
-    logging.info("\nNodes per depth:")
-    for depth, nodes in nodes_at_depth.items():
-        logging.info(f"Depth {depth}: {len(nodes)} nodes")
-        
-    logging.info(f"\nTotal nodes: {len(final_graph['nodes'])}")
-    logging.info(f"Total edges: {len(final_graph['links'])}")
-    logging.info(f"Edge weight distribution:")
-    weight_counts = {}
-    for link in final_graph["links"]:
-        weight = link["value"]
-        weight_counts[weight] = weight_counts.get(weight, 0) + 1
-    for weight, count in sorted(weight_counts.items()):
-        logging.info(f"Weight {weight}: {count} edges")
-
-    # Save to file
-    with open('public/graph.json', 'w', encoding='utf-8') as f:
-        json.dump(final_graph, f, ensure_ascii=False, indent=2)
+    logging.info(f"\nTotal nodes: {len(graph_manager.nodes)}")
+    logging.info(f"Total edges: {len(graph_manager.edges)}")
 
 if __name__ == "__main__":
     try:
