@@ -260,6 +260,9 @@ export default function Home() {
           <div className="text-gray-400 font-medium">Loading visualization...</div>
         </div>
       )}
+      <div className="absolute bottom-2 right-2 text-[8px] text-gray-300 font-medium">
+        "A SANDHEEP RAJKUMAR PROJECT"
+      </div>
     </main>
   );
 } 
