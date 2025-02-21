@@ -190,35 +190,49 @@ class GraphManager:
 
         # Calculate depths using BFS
         if progress_callback:
-            progress_callback("Calculating node depths", 0)
+            progress_callback("Calculating node depths", 0, len(self.nodes))
             
         depths = {"Architecture": 0}
         queue = [("Architecture", 0)]
         visited = {"Architecture"}
-        nodes_processed = 0
+        nodes_processed = 1  # Start at 1 since we've processed Architecture
         total_nodes = len(self.nodes)
-
-        while queue:
-            current, depth = queue.pop(0)
-            nodes_processed += 1
-            if progress_callback and nodes_processed % 100 == 0:
-                progress_callback("Calculating node depths", nodes_processed, total_nodes)
-                
-            for edge in self.edges.values():
-                if edge["source"] == current and edge["target"] not in visited:
-                    depths[edge["target"]] = depth + 1
-                    queue.append((edge["target"], depth + 1))
-                    visited.add(edge["target"])
-                elif edge["target"] == current and edge["source"] not in visited:
-                    depths[edge["source"]] = depth + 1
-                    queue.append((edge["source"], depth + 1))
-                    visited.add(edge["source"])
+        edges_by_node = {}
+        
+        # Pre-process edges to make lookup faster
+        for edge in self.edges.values():
+            source = edge["source"]
+            target = edge["target"]
+            if source not in edges_by_node:
+                edges_by_node[source] = set()
+            if target not in edges_by_node:
+                edges_by_node[target] = set()
+            edges_by_node[source].add(target)
+            edges_by_node[target].add(source)
 
         if progress_callback:
-            progress_callback("Preparing nodes for export", 0)
+            progress_callback("Calculating node depths", nodes_processed, total_nodes)
+
+        while queue and nodes_processed < total_nodes:
+            current, depth = queue.pop(0)
+            
+            if current not in edges_by_node:
+                continue
+                
+            for neighbor in edges_by_node[current]:
+                if neighbor not in visited:
+                    depths[neighbor] = depth + 1
+                    queue.append((neighbor, depth + 1))
+                    visited.add(neighbor)
+                    nodes_processed += 1
+                    
+                    if progress_callback and nodes_processed % 100 == 0:
+                        progress_callback("Calculating node depths", min(nodes_processed, total_nodes), total_nodes)
+
+        if progress_callback:
+            progress_callback("Preparing nodes for export", 0, total_nodes)
             
         # Transform nodes
-        nodes_processed = 0
         graph_data = {
             "nodes": [
                 {
@@ -237,12 +251,10 @@ class GraphManager:
         }
         
         if progress_callback:
-            progress_callback("Processing edges", 0)
+            progress_callback("Processing edges", 0, len(self.edges))
             
         # Transform edges
-        edges_processed = 0
         total_edges = len(self.edges)
-        
         graph_data["links"] = [
             {
                 "source": data["source"],
