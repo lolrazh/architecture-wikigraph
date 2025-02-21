@@ -2,6 +2,7 @@ import json
 import os
 import time
 from crawler import GraphManager, is_architecture_related
+from collections import defaultdict
 
 def main():
     print("\nStarting simplified graph export process...")
@@ -17,6 +18,16 @@ def main():
         "links": []
     }
     
+    # Create adjacency list for faster edge lookup
+    print("Building adjacency list...")
+    adjacency_list = defaultdict(list)
+    for edge in graph_manager.edges.values():
+        source = edge["source"]
+        target = edge["target"]
+        if source in graph_manager.nodes and target in graph_manager.nodes:
+            adjacency_list[source].append(target)
+            adjacency_list[target].append(source)
+    
     # Calculate depths using BFS
     depths = {"Architecture": 0}
     queue = [("Architecture", 0)]
@@ -26,32 +37,27 @@ def main():
     print("Calculating node depths...")
     while queue:
         current, depth = queue.pop(0)
-        if depth >= 2:  # Changed to depth 2
+        
+        # Skip if we're beyond depth 2
+        if depth >= 2:
             continue
-            
-        # Get immediate neighbors
-        for edge in graph_manager.edges.values():
-            source = edge["source"]
-            target = edge["target"]
-            
-            # Skip edges with missing nodes
-            if source not in graph_manager.nodes or target not in graph_manager.nodes:
-                continue
-            
-            if source == current and target not in visited:
-                depths[target] = depth + 1
-                visited.add(target)
-                queue.append((target, depth + 1))
-            elif target == current and source not in visited:
-                depths[source] = depth + 1
-                visited.add(source)
-                queue.append((source, depth + 1))
+        
+        # Process immediate neighbors
+        for neighbor in adjacency_list[current]:
+            if neighbor not in visited:
+                depths[neighbor] = depth + 1
+                visited.add(neighbor)
+                queue.append((neighbor, depth + 1))
     
     # Add nodes within depth 2
     print("Adding nodes to simplified graph...")
-    for node_id in visited:
+    for node_id, depth in depths.items():
         if node_id not in graph_manager.nodes:
             print(f"Warning: Node {node_id} referenced but not found in graph")
+            continue
+            
+        # Only add if it's within depth 2
+        if depth > 2:
             continue
             
         # Determine if it's architecture-related
@@ -63,12 +69,11 @@ def main():
         
         # Only add if it's the root or architecture-related
         if node_id == "Architecture" or is_arch:
-            depth = depths[node_id]
             node_data = {
                 "id": node_id,
                 "depth": depth,
                 "category": "root" if node_id == "Architecture" else "architecture",
-                "loaded": depth <= 1  # Only depth 0 and 1 nodes are initially loaded
+                "loaded": True  # All nodes are loaded by default
             }
             simplified_graph["nodes"].append(node_data)
     
@@ -78,14 +83,16 @@ def main():
     for edge in graph_manager.edges.values():
         source = edge["source"]
         target = edge["target"]
-        if source in valid_nodes and target in valid_nodes:
+        # Only add links where both nodes are valid and within depth 2
+        if (source in valid_nodes and target in valid_nodes and 
+            valid_nodes[source] <= 2 and valid_nodes[target] <= 2):
             source_depth = valid_nodes[source]
             target_depth = valid_nodes[target]
             simplified_graph["links"].append({
                 "source": source,
                 "target": target,
-                "depth": max(source_depth, target_depth),  # Link depth is max of its nodes
-                "loaded": max(source_depth, target_depth) <= 1  # Only depth 0-1 links initially loaded
+                "depth": max(source_depth, target_depth),
+                "loaded": True  # All links are loaded by default
             })
     
     # Save to file
@@ -102,16 +109,15 @@ def main():
     # Print statistics
     print(f"\nExport completed in {duration:.1f} seconds!")
     print(f"Simplified graph has:")
-    total_nodes = len(simplified_graph['nodes'])
-    depth1_nodes = sum(1 for node in simplified_graph['nodes'] if node['depth'] <= 1)
-    depth2_nodes = total_nodes - depth1_nodes
-    total_links = len(simplified_graph['links'])
-    loaded_links = sum(1 for link in simplified_graph['links'] if link['loaded'])
     
-    print(f"- {depth1_nodes} nodes (depth 0-1, initially loaded)")
-    print(f"- {depth2_nodes} nodes (depth 2, loaded on demand)")
-    print(f"- {loaded_links} links (initially loaded)")
-    print(f"- {total_links - loaded_links} links (loaded on demand)")
+    # Count nodes by depth
+    depth_counts = defaultdict(int)
+    for node in simplified_graph['nodes']:
+        depth_counts[node['depth']] += 1
+    
+    for depth in sorted(depth_counts.keys()):
+        print(f"- {depth_counts[depth]} nodes at depth {depth}")
+    print(f"- {len(simplified_graph['links'])} total links")
     print(f"\nGraph has been exported to {output_path}")
 
 if __name__ == "__main__":

@@ -83,7 +83,11 @@ export default function Home() {
   const svgRef = useRef<SVGSVGElement>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [simulation, setSimulation] = useState<d3.Simulation<Node, Link> | null>(null);
-  const [loadingNodes, setLoadingNodes] = useState<Set<string>>(new Set());
+
+  // Helper function to get node ID regardless of format
+  const getNodeId = (node: any): string => {
+    return typeof node === 'string' ? node : node.id;
+  };
 
   // Function to merge new data with existing graph
   const mergeGraphData = (existing: GraphData, newData: GraphData) => {
@@ -103,97 +107,26 @@ export default function Home() {
     // Add new links
     newData.links.forEach(newLink => {
       const existingIndex = links.findIndex(l => 
-        (l.source as Node).id === (newLink.source as string) && 
-        (l.target as Node).id === (newLink.target as string)
+        getNodeId(l.source) === getNodeId(newLink.source) && 
+        getNodeId(l.target) === getNodeId(newLink.target)
       );
       if (existingIndex === -1) {
-        links.push(newLink);
+        // For new links, ensure source and target are node references
+        const sourceNode = nodes.find(n => n.id === getNodeId(newLink.source));
+        const targetNode = nodes.find(n => n.id === getNodeId(newLink.target));
+        if (sourceNode && targetNode) {
+          links.push({
+            ...newLink,
+            source: sourceNode,
+            target: targetNode
+          });
+        }
       } else {
         links[existingIndex] = { ...links[existingIndex], ...newLink };
       }
     });
 
     return { nodes, links };
-  };
-
-  // Function to load depth 2 nodes
-  const loadDepth2Nodes = async (nodeId: string) => {
-    if (loadingNodes.has(nodeId)) {
-      console.log(`Already loading depth 2 nodes for ${nodeId}`);
-      return;
-    }
-    
-    console.log(`Loading depth 2 nodes for ${nodeId}...`);
-    setLoadingNodes(prev => new Set(prev).add(nodeId));
-    
-    try {
-      const response = await fetch(`/api/node-connections?id=${nodeId}&depth2=true`);
-      const newData = await response.json();
-      
-      console.log(`Received depth 2 data for ${nodeId}:`, {
-        newNodes: newData.nodes.length,
-        newLinks: newData.links.length
-      });
-      
-      // Convert string IDs to node references for new links
-      const processedLinks = newData.links.map((link: any) => ({
-        ...link,
-        source: newData.nodes.find((n: Node) => n.id === link.source) || link.source,
-        target: newData.nodes.find((n: Node) => n.id === link.target) || link.target
-      }));
-
-      setGraphData(prev => {
-        const merged = mergeGraphData(prev, { 
-          nodes: newData.nodes,
-          links: processedLinks
-        });
-        
-        console.log(`Merged graph data for ${nodeId}:`, {
-          totalNodes: merged.nodes.length,
-          totalLinks: merged.links.length,
-          newNodesAdded: merged.nodes.length - prev.nodes.length,
-          newLinksAdded: merged.links.length - prev.links.length
-        });
-        
-        // Restart simulation with new data
-        if (simulation) {
-          simulation
-            .nodes(merged.nodes)
-            .force('link', d3.forceLink<Node, Link>(merged.links)
-              .id(d => d.id)
-              .distance(200)
-            );
-          
-          // Temporarily increase repulsion
-          const charge = simulation.force<d3.ForceManyBody<Node>>('charge');
-          if (charge) {
-            console.log('Increasing repulsion force temporarily');
-            charge.strength(-3000);
-          }
-          simulation.alpha(0.5).restart();
-          
-          // Reset repulsion after stabilization
-          setTimeout(() => {
-            if (charge) {
-              console.log('Resetting repulsion force');
-              charge.strength(-2000);
-            }
-            simulation.alpha(0.1).restart();
-          }, 2000);
-        }
-        
-        return merged;
-      });
-    } catch (error) {
-      console.error('Error loading depth 2 nodes:', error);
-    } finally {
-      console.log(`Finished loading depth 2 nodes for ${nodeId}`);
-      setLoadingNodes(prev => {
-        const next = new Set(prev);
-        next.delete(nodeId);
-        return next;
-      });
-    }
   };
 
   useEffect(() => {
@@ -220,18 +153,28 @@ export default function Home() {
 
       svg.call(zoom);
 
-      // Fetch initial data
+      // Fetch all graph data
+      console.log('Loading complete graph data...');
       const response = await fetch('/api/node-connections?id=Architecture');
       const data = await response.json();
+      
+      console.log('Received graph data:', {
+        nodes: data.nodes.length,
+        links: data.links.length
+      });
 
       // Process links to use node references instead of string IDs
-      const processedLinks = data.links.map((link: any) => ({
-        ...link,
-        source: data.nodes.find((n: Node) => n.id === link.source) || link.source,
-        target: data.nodes.find((n: Node) => n.id === link.target) || link.target
-      }));
+      const processedLinks = data.links.map((link: any) => {
+        const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
+        const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
+        return {
+          ...link,
+          source: sourceNode || link.source,
+          target: targetNode || link.target
+        };
+      });
 
-      // Create simulation
+      // Create simulation with stronger initial forces for better layout
       const sim = d3.forceSimulation<Node>(data.nodes)
         .force('link', d3.forceLink<Node, Link>(processedLinks)
           .id(d => d.id)
@@ -246,10 +189,14 @@ export default function Home() {
       setSimulation(sim);
       setGraphData({ nodes: data.nodes, links: processedLinks });
 
-      // Color scheme
-      const colors: Record<NodeCategory, string> = {
-        root: '#94a3b8',
-        architecture: '#fca5a5'
+      // Color scheme based on depth
+      const getNodeColor = (depth: number): string => {
+        switch (depth) {
+          case 0: return '#94a3b8'; // Root (Architecture)
+          case 1: return '#fca5a5'; // Direct connections
+          case 2: return '#86efac'; // Secondary connections (depth 2)
+          default: return '#94a3b8';
+        }
       };
 
       // Create links
@@ -279,12 +226,12 @@ export default function Home() {
             if (!event.active) sim.alphaTarget(0);
             d.fx = null;
             d.fy = null;
-          }) as any); // Type assertion needed for d3.drag compatibility
+          }) as any);
 
       // Add circles to nodes
       nodes.append('circle')
         .attr('r', function(d: Node) { return d.category === 'root' ? 12 : 8; } as any)
-        .attr('fill', function(d: Node) { return colors[d.category]; } as any)
+        .attr('fill', function(d: Node) { return getNodeColor(d.depth); } as any)
         .attr('stroke', '#fff')
         .attr('stroke-width', 1);
 
@@ -298,15 +245,9 @@ export default function Home() {
         .attr('font-size', function(d: Node) { return d.category === 'root' ? '14px' : '12px'; } as any)
         .style('pointer-events', 'none');
 
-      // Add click handler for depth 2 loading
+      // Add click handler for Wikipedia links
       nodes.on('click', function(this: SVGGElement, event: any, d: Node) {
-        if (event.shiftKey) {
-          // Load depth 2 nodes when shift-clicking
-          loadDepth2Nodes(d.id);
-        } else {
-          // Regular click opens Wikipedia
-          window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(d.id)}`, '_blank');
-        }
+        window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(d.id)}`, '_blank');
       });
 
       // Update positions on tick
@@ -345,9 +286,6 @@ export default function Home() {
       <svg ref={svgRef} className="w-screen h-screen" />
       <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-medium">
         A SANDHEEP RAJKUMAR PROJECT
-      </div>
-      <div className="absolute top-2 right-2 text-[10px] text-gray-400 font-medium">
-        Shift + Click to expand nodes
       </div>
     </main>
   );

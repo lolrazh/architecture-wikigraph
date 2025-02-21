@@ -545,7 +545,7 @@ async def main_async():
     )
     logging.debug("Initialized Wikipedia API")
 
-    CONCURRENT_REQUESTS = 20
+    CONCURRENT_REQUESTS = 50
     RATE_LIMIT_DELAY = 0.1
 
     # Initialize graph manager
