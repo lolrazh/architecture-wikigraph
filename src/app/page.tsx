@@ -2,6 +2,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { Space_Mono } from 'next/font/google';
+
+const spaceMono = Space_Mono({
+  weight: '400',
+  subsets: ['latin'],
+});
 
 interface Node extends d3.SimulationNodeDatum {
   id: string;
@@ -64,6 +70,38 @@ function wrap(text: d3.Selection<SVGTextElement, Node, SVGGElement, unknown>, wi
 export default function Home() {
   const svgRef = useRef<SVGSVGElement>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [titlePosition, setTitlePosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    // Prevent text selection during drag
+    e.preventDefault();
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDragging) {
+      setTitlePosition(prev => ({
+        x: prev.x + e.movementX,
+        y: prev.y + e.movementY
+      }));
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  useEffect(() => {
+    // Add global mouse event listeners
+    document.addEventListener('mousemove', handleMouseMove as any);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove as any);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -260,8 +298,20 @@ export default function Home() {
           <div className="text-gray-400 font-medium">Loading visualization...</div>
         </div>
       )}
-      <div className="absolute bottom-2 right-2 text-[8px] text-gray-300 font-medium">
-        "A SANDHEEP RAJKUMAR PROJECT"
+      <div 
+        className="absolute px-6 py-3 backdrop-blur-md bg-white/5 rounded-2xl border border-white/10 shadow-xl cursor-move select-none"
+        style={{
+          transform: `translate(calc(-50% + ${titlePosition.x}px), calc(2rem + ${titlePosition.y}px))`,
+          left: '50%',
+        }}
+        onMouseDown={handleMouseDown}
+      >
+        <h1 className={`text-lg bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 text-transparent bg-clip-text ${spaceMono.className}`}>
+          Architecture Wikigraph
+        </h1>
+      </div>
+      <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-medium">
+        A SANDHEEP RAJKUMAR PROJECT
       </div>
     </main>
   );
