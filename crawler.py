@@ -68,12 +68,36 @@ def get_main_content_links(page_title):
     content = soup.find(id='mw-content-text')
     if not content:
         return set()
+
+    # First, find and remove all reference tags
+    ref_tags = content.find_all('ref')
+    for ref in ref_tags:
+        ref.decompose()
     
-    # Get all links from the main content, excluding tables and navigation boxes
+    # Find and remove reference sections and other non-main content
+    reference_sections = content.find_all(['div', 'span', 'section'], 
+        class_=['reflist', 'reference', 'references', 'mw-references-wrap', 'reference-text'])
+    for section in reference_sections:
+        section.decompose()
+
+    # Remove sections with reference-related headings
+    for heading in content.find_all(['h2', 'h3']):
+        heading_text = heading.get_text().strip().lower()
+        if heading_text in ['references', 'notes', 'citations', 'sources', 'footnotes', 'works cited']:
+            # Remove the entire section that follows this heading
+            section = heading.find_next_sibling()
+            while section and section.name not in ['h2', 'h3']:
+                next_elem = section.find_next_sibling()
+                section.decompose()
+                section = next_elem
+            heading.decompose()  # Remove the heading itself
+
+    # Get all links from the cleaned main content
     main_links = set()
     for link in content.find_all('a'):
-        # Skip links in tables, navboxes, and reference sections
-        if link.find_parent(['table', 'div'], class_=['navbox', 'reflist', 'reference']):
+        # Skip links in tables, navboxes, and any remaining reference-like elements
+        if link.find_parent(['table', 'div'], class_=['navbox', 'reflist', 'reference', 
+                                                     'references', 'mw-references-wrap', 'reference-text']):
             continue
             
         # Get the href attribute
