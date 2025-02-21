@@ -562,6 +562,9 @@ video {
 [hidden]:where(:not([hidden="until-found"])) {
   display: none;
 }
+.visible {
+  visibility: visible;
+}
 .fixed {
   position: fixed;
 }
@@ -576,6 +579,9 @@ video {
 }
 .right-2 {
   right: 0.5rem;
+}
+.mt-2 {
+  margin-top: 0.5rem;
 }
 .flex {
   display: flex;
@@ -672,6 +678,10 @@ video {
   font-size: 1.125rem;
   line-height: 1.75rem;
 }
+.text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
 .font-medium {
   font-weight: 500;
 }
@@ -694,6 +704,9 @@ video {
   --tw-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
   --tw-shadow-colored: 0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+.filter {
+  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
 }
 .backdrop-blur-md {
   --tw-backdrop-blur: blur(12px);

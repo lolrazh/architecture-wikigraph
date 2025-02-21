@@ -21,6 +21,7 @@ interface NodeData {
   first_paragraph: string;
   sections: string[];
   categories: string[];
+  isExpanded?: boolean;
 }
 
 interface Node extends d3.SimulationNodeDatum, NodeData {}
@@ -82,6 +83,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [titlePosition, setTitlePosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['Architecture']));
+  const [visibleNodes, setVisibleNodes] = useState<Node[]>([]);
+  const [visibleLinks, setVisibleLinks] = useState<Link[]>([]);
+  const simulationRef = useRef<d3.Simulation<Node, Link> | null>(null);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
@@ -113,6 +119,45 @@ export default function Home() {
     };
   }, [isDragging]);
 
+  const expandNode = (nodeId: string) => {
+    if (expandedNodes.has(nodeId) || !graphData) return;
+    
+    const newExpandedNodes = new Set(expandedNodes);
+    newExpandedNodes.add(nodeId);
+    setExpandedNodes(newExpandedNodes);
+
+    // Get all nodes that are directly connected to expanded nodes
+    const newVisibleNodes = graphData.nodes.filter(node => 
+      newExpandedNodes.has(node.id) || 
+      graphData.links.some(link => 
+        (link.source === nodeId && newExpandedNodes.has((link.target as Node).id)) ||
+        (link.target === nodeId && newExpandedNodes.has((link.source as Node).id))
+      )
+    );
+
+    // Get all links between visible nodes
+    const newVisibleLinks = graphData.links.filter(link => 
+      newExpandedNodes.has((link.source as Node).id) && 
+      newExpandedNodes.has((link.target as Node).id)
+    );
+
+    setVisibleNodes(newVisibleNodes);
+    setVisibleLinks(newVisibleLinks);
+
+    // Restart simulation with new nodes
+    if (simulationRef.current) {
+      simulationRef.current.nodes(newVisibleNodes);
+      simulationRef.current.force('link', d3.forceLink<Node, Link>(newVisibleLinks)
+        .id(d => d.id)
+        .distance(d => {
+          const source = d.source as Node;
+          const target = d.target as Node;
+          return source.category === target.category ? 100 : 150;
+        }));
+      simulationRef.current.alpha(1).restart();
+    }
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -121,11 +166,30 @@ export default function Home() {
         if (!response.ok) {
           throw new Error(`Failed to fetch graph data: ${response.status} ${response.statusText}`);
         }
-        const graphData: GraphData = await response.json();
+        const data: GraphData = await response.json();
         console.log('Graph data loaded:', {
-          nodes: graphData.nodes.length,
-          links: graphData.links.length
+          nodes: data.nodes.length,
+          links: data.links.length
         });
+
+        setGraphData(data);
+        
+        // Initialize with only the Architecture node and its immediate neighbors
+        const initialNodes = data.nodes.filter(node => 
+          node.id === 'Architecture' ||
+          data.links.some(link => 
+            (link.source === 'Architecture' && (link.target as Node).id === node.id) ||
+            (link.target === 'Architecture' && (link.source as Node).id === node.id)
+          )
+        );
+
+        const initialLinks = data.links.filter(link => 
+          (link.source as Node).id === 'Architecture' ||
+          (link.target as Node).id === 'Architecture'
+        );
+
+        setVisibleNodes(initialNodes);
+        setVisibleLinks(initialLinks);
         
         if (!svgRef.current) {
           console.error('SVG ref is not available');
@@ -145,7 +209,6 @@ export default function Home() {
           .attr('width', width)
           .attr('height', height)
           .attr('class', 'bg-[#0a0a0a]');
-        console.log('SVG element created');
 
         // Add zoom functionality
         const g = svg.append('g');
@@ -166,14 +229,12 @@ export default function Home() {
         };
 
         // Create force simulation
-        const simulation = d3.forceSimulation<Node>(graphData.nodes)
-          .force('link', d3.forceLink<Node, Link>(graphData.links)
+        const simulation = d3.forceSimulation<Node>(initialNodes)
+          .force('link', d3.forceLink<Node, Link>(initialLinks)
             .id(d => d.id)
             .distance(d => {
-              // Cast source and target to Node type
               const source = d.source as Node;
               const target = d.target as Node;
-              // Increase distance for nodes of different categories
               return source.category === target.category ? 100 : 150;
             }))
           .force('charge', d3.forceManyBody<Node>()
@@ -186,15 +247,16 @@ export default function Home() {
           .force('x', d3.forceX(width / 2).strength(0.05))
           .force('y', d3.forceY(height / 2).strength(0.05));
 
+        simulationRef.current = simulation;
+
         // Create links
         const links = g.append('g')
           .selectAll('line')
-          .data(graphData.links)
+          .data(initialLinks)
           .join('line')
           .attr('stroke', d => {
             const source = d.source as Node;
             const target = d.target as Node;
-            // Use gradient for links between different categories
             return source.category === target.category ? 
               'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.5)';
           })
@@ -202,14 +264,13 @@ export default function Home() {
           .attr('stroke-width', d => {
             const source = d.source as Node;
             const target = d.target as Node;
-            // Thicker lines for architecture-related connections
             return (source.category === 'architecture' || target.category === 'architecture') ? 2 : 1;
           });
 
         // Create nodes
         const nodes = g.append('g')
           .selectAll<SVGGElement, Node>('g')
-          .data(graphData.nodes)
+          .data(initialNodes)
           .join('g')
           .call(d3.drag<SVGGElement, Node>()
             .on('start', (event, d) => {
@@ -266,6 +327,13 @@ export default function Home() {
         // Add title for hover tooltip
         nodes.append('title')
           .text(d => denormalizeTitle(d.id));
+
+        // Add double-click handler to expand nodes
+        nodes.on('dblclick', (event, d) => {
+          event.preventDefault();
+          event.stopPropagation();
+          expandNode(d.id);
+        });
 
         // Add click handler to open Wikipedia page
         nodes.on('click', (event, d) => {
@@ -333,6 +401,9 @@ export default function Home() {
         <h1 className={`text-lg bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 text-transparent bg-clip-text ${spaceMono.className}`}>
           Architecture Wikigraph
         </h1>
+        <div className="mt-2 text-xs text-gray-400">
+          Double-click nodes to expand • Click to open Wikipedia
+        </div>
       </div>
       <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-medium">
         A SANDHEEP RAJKUMAR PROJECT
