@@ -21,6 +21,19 @@ function getNodeColor(depth: number): string {
     }
 }
 
+const LoadingText = () => {
+    const [dots, setDots] = useState('');
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setDots(prev => prev.length >= 3 ? '' : prev + '.');
+        }, 500);
+        return () => clearInterval(interval);
+    }, []);
+
+    return <span>Loading graph{dots}</span>;
+};
+
 const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<any>(null);
@@ -161,7 +174,40 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     }, [isLoading, width, height, memoizedData, onNodeClick, updateForcesForNode]); // Use memoizedData in deps
 
     if (isLoading) {
-        return null;
+        return (
+            <div className={spaceMono.className} style={{ 
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center', 
+                justifyContent: 'center',
+                background: '#0a0a0a',
+                color: '#e5e7eb',
+                margin: 0,
+                padding: 0,
+                overflow: 'hidden'
+            }}>
+                <div style={{
+                    position: 'absolute',
+                    top: '1rem',
+                    left: '1rem',
+                    fontSize: '1.25rem',
+                    fontWeight: 'bold',
+                    zIndex: 10
+                }}>
+                    Architecture Wikigraph
+                </div>
+                <div style={{
+                    fontSize: '1.25rem'
+                }}>
+                    <LoadingText />
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -184,6 +230,35 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
                     top: 0,
                     left: 0
                 }} />
+            </div>
+            
+            {/* Title */}
+            <div style={{
+                position: 'fixed',
+                top: '1rem',
+                left: '1rem',
+                color: '#e5e7eb',
+                fontSize: '1.25rem',
+                fontWeight: 'bold',
+                zIndex: 10,
+                pointerEvents: 'none'
+            }}>
+                Architecture Wikigraph
+            </div>
+
+            {/* Author Credit */}
+            <div style={{
+                position: 'fixed',
+                bottom: '0.5rem',
+                right: '0.5rem',
+                color: '#9ca3af',
+                fontSize: '0.5rem',
+                fontWeight: 'bold',
+                zIndex: 10,
+                textAlign: 'right',
+                pointerEvents: 'none'
+            }}>
+                "A SANDHEEP RAJKUMAR PROJECT"
             </div>
         </div>
     );
