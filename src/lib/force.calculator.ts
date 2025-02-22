@@ -25,20 +25,27 @@ export class ForceCalculator {
     }
 
     dispose(): void {
+        if (this.disposed) return;
         this.disposed = true;
         this.theta = 0;
         this.repulsionStrength = 0;
         this.attractionStrength = 0;
     }
 
+    isDisposed(): boolean {
+        return this.disposed;
+    }
+
     private checkDisposed(): void {
         if (this.disposed) {
-            throw new Error('ForceCalculator has been disposed');
+            console.warn('ForceCalculator has been disposed');
+            return;
         }
     }
 
     calculateForces(node: Point, quadNode: QuadTreeNode): Force {
-        this.checkDisposed();
+        if (this.disposed) return { fx: 0, fy: 0 };
+        
         // If node has no mass, skip calculation
         if (quadNode.mass === 0) return { fx: 0, fy: 0 };
 
@@ -69,7 +76,8 @@ export class ForceCalculator {
     }
 
     calculateAttraction(edge: Edge): Force {
-        this.checkDisposed();
+        if (this.disposed) return { fx: 0, fy: 0 };
+        
         const dx = edge.target.x - edge.source.x;
         const dy = edge.target.y - edge.source.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
