@@ -4,6 +4,26 @@ import React, { useEffect, useRef } from 'react';
 import ForceGraph3D from '3d-force-graph';
 import { GraphProps, Node } from '../types/graph';
 
+// Helper function to get node color based on depth
+function getNodeColor(depth: number): string {
+  switch (depth) {
+    case 0: return '#94a3b8'; // Root (Architecture)
+    case 1: return '#fca5a5'; // Direct connections
+    case 2: return '#86efac'; // Secondary connections
+    default: return '#94a3b8';
+  }
+}
+
+// Helper function to get node size based on depth
+function getNodeSize(node: Node): number {
+  switch (node.depth) {
+    case 0: return 25; // Root node (Architecture) - Much bigger
+    case 1: return 10; // Direct connections
+    case 2: return 6;  // Secondary connections
+    default: return 4;
+  }
+}
+
 export const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
@@ -20,21 +40,21 @@ export const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }
       .backgroundColor('#0a0a0a')
       // Node styling
       .nodeAutoColorBy('depth')
-      .nodeVal(node => (node as Node).category === 'root' ? 8 : 5)
+      .nodeVal((node: any) => getNodeSize(node as Node))
       .nodeLabel(node => (node as Node).id.replace(/_/g, ' '))
       // Link styling
       .linkColor(() => '#94a3b8')
-      .linkOpacity(0.6)
-      .linkWidth(1)
+      .linkOpacity(0.4) // Reduced opacity
+      .linkWidth(0.5)   // Thinner links
       // Add interaction and data
       .onNodeClick((node: any) => onNodeClick?.(node as Node))
       .graphData(data);
 
-    // Configure forces
+    // Configure forces - Adjust to accommodate larger root node
     graph.d3Force('charge')?.strength(-3000).distanceMax(500);
-    graph.d3Force('link')?.distance(250);
+    graph.d3Force('link')?.distance(300); // Increased distance
     graph.d3Force('center')?.strength(1);
-    graph.d3Force('collide')?.radius(60);
+    graph.d3Force('collide')?.radius(80); // Increased collision radius
 
     // Store reference for cleanup
     graphRef.current = graph;
@@ -48,14 +68,4 @@ export const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }
   }, [width, height, data, onNodeClick]);
 
   return <div ref={containerRef} />;
-};
-
-// Helper function to get node color based on depth
-function getNodeColor(depth: number): string {
-  switch (depth) {
-    case 0: return '#94a3b8'; // Root (Architecture)
-    case 1: return '#fca5a5'; // Direct connections
-    case 2: return '#86efac'; // Secondary connections
-    default: return '#94a3b8';
-  }
-} 
+}; 
