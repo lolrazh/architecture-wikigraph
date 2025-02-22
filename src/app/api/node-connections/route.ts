@@ -1,15 +1,54 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
+import { GraphData, Node, Link } from '../../../types/graph';
 
 const graphPath = path.join(process.cwd(), 'public', 'graph.json');
-let cachedGraph: any = null;
+let cachedGraph: GraphData | null = null;
+
+// Validate node structure
+function isValidNode(node: any): node is Node {
+  return (
+    typeof node === 'object' &&
+    node !== null &&
+    typeof node.id === 'string' &&
+    typeof node.depth === 'number' &&
+    (node.category === 'root' || node.category === 'architecture')
+  );
+}
+
+// Validate link structure
+function isValidLink(link: any): link is Link {
+  return (
+    typeof link === 'object' &&
+    link !== null &&
+    typeof link.source === 'string' &&
+    typeof link.target === 'string' &&
+    (typeof link.depth === 'undefined' || typeof link.depth === 'number')
+  );
+}
+
+// Validate graph data structure
+function isValidGraphData(data: any): data is GraphData {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    Array.isArray(data.nodes) &&
+    Array.isArray(data.links) &&
+    data.nodes.every(isValidNode) &&
+    data.links.every(isValidLink)
+  );
+}
 
 // Cache the graph data in memory after first load
-async function getGraphData() {
+async function getGraphData(): Promise<GraphData> {
   if (!cachedGraph) {
     try {
-      cachedGraph = JSON.parse(await fs.readFile(graphPath, 'utf-8'));
+      const data = JSON.parse(await fs.readFile(graphPath, 'utf-8'));
+      if (!isValidGraphData(data)) {
+        throw new Error('Invalid graph data structure');
+      }
+      cachedGraph = data;
     } catch (error) {
       console.error('Error reading graph data:', error);
       throw new Error('Failed to read graph data');
@@ -31,23 +70,20 @@ export async function GET(request: Request) {
 
     // For Architecture node (initial load), return all nodes and links
     if (nodeId === 'Architecture') {
-      return NextResponse.json({
-        nodes: graphData.nodes,
-        links: graphData.links
-      });
+      return NextResponse.json(graphData);
     }
 
     // For other nodes, return their immediate connections
-    const nodeConnections = graphData.links.filter((link: any) =>
+    const nodeConnections = graphData.links.filter(link =>
       link.source === nodeId || link.target === nodeId
     );
 
     const connectedNodeIds = new Set<string>([nodeId]);
-    nodeConnections.forEach((link: any) => {
+    nodeConnections.forEach(link => {
       connectedNodeIds.add(link.source === nodeId ? link.target : link.source);
     });
 
-    const connectedNodes = graphData.nodes.filter((node: any) =>
+    const connectedNodes = graphData.nodes.filter(node =>
       connectedNodeIds.has(node.id)
     );
 
@@ -58,6 +94,9 @@ export async function GET(request: Request) {
 
   } catch (error) {
     console.error('Error fetching node connections:', error);
-    return NextResponse.json({ error: 'Failed to fetch node connections' }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch node connections' },
+      { status: 500 }
+    );
   }
 } 
