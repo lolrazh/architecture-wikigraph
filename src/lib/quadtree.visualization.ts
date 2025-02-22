@@ -4,7 +4,6 @@ import { QuadTree, QuadTreeNode } from './quadtree';
 export class QuadTreeVisualizer {
     private scene: THREE.Scene;
     private quadTreeMesh: THREE.Group;
-    private debugObjects: THREE.Object3D[] = [];
     private lineColor = 0x00ff00;  // Green for quadtree boundaries
     private centerColor = 0xff0000; // Red for centers of mass
     private lineWidth = 2;

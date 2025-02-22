@@ -36,13 +36,6 @@ export class ForceCalculator {
         return this.disposed;
     }
 
-    private checkDisposed(): void {
-        if (this.disposed) {
-            console.warn('ForceCalculator has been disposed');
-            return;
-        }
-    }
-
     calculateForces(node: Point, quadNode: QuadTreeNode): Force {
         if (this.disposed) return { fx: 0, fy: 0 };
         
