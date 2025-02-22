@@ -5,6 +5,7 @@ import { GraphProps, Node } from '../types/graph';
 import { QuadTree } from '../lib/quadtree';
 import { ForceCalculator } from '../lib/force.calculator';
 import { Space_Mono } from 'next/font/google';
+import { LoadingOverlay, LoadingState } from './LoadingOverlay';
 
 const spaceMono = Space_Mono({
     weight: '400',
@@ -21,24 +22,16 @@ function getNodeColor(depth: number): string {
     }
 }
 
-const LoadingText = () => {
-    const [dots, setDots] = useState('');
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setDots(prev => prev.length >= 3 ? '' : prev + '.');
-        }, 500);
-        return () => clearInterval(interval);
-    }, []);
-
-    return <span>Loading graph{dots}</span>;
-};
-
 const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<any>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const ForceGraph3DRef = useRef<any>(null);
+    const [loadingState, setLoadingState] = useState<LoadingState>({
+        dataLoading: false,
+        graphModuleLoading: true,
+        graphInitializing: true
+    });
+
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
         theta: 0.5,
         repulsionStrength: 1,
@@ -133,24 +126,24 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     useEffect(() => {
         import('3d-force-graph').then(module => {
             ForceGraph3DRef.current = module.default;
-            setIsLoading(false);
+            setLoadingState(prev => ({ ...prev, graphModuleLoading: false }));
         }).catch(error => {
             console.error('Failed to load ForceGraph3D:', error);
-            setIsLoading(false);
+            setLoadingState(prev => ({ ...prev, graphModuleLoading: false }));
         });
     }, []);
 
     // Initialize graph when container and module are ready
     useEffect(() => {
-        if (isLoading || !containerRef.current || !ForceGraph3DRef.current) {
-            return undefined; // Early return with undefined for cleanup
+        if (loadingState.graphModuleLoading || !containerRef.current || !ForceGraph3DRef.current) {
+            return undefined;
         }
 
         try {
             const graph = ForceGraph3DRef.current()(containerRef.current)
                 .width(width)
                 .height(height)
-                .graphData(memoizedData) // Use memoized data
+                .graphData(memoizedData)
                 .nodeColor((node: Node) => getNodeColor(node.depth))
                 .nodeLabel((node: Node) => node.id)
                 .nodeResolution(8)
@@ -161,6 +154,11 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
                 });
 
             graphRef.current = graph;
+            
+            // Set initializing to false after a short delay to ensure graph is rendered
+            setTimeout(() => {
+                setLoadingState(prev => ({ ...prev, graphInitializing: false }));
+            }, 1000);
 
             return () => {
                 if (graphRef.current) {
@@ -169,49 +167,14 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             };
         } catch (error) {
             console.error('Error initializing graph:', error);
-            return undefined; // Return undefined in case of error
+            setLoadingState(prev => ({ ...prev, graphInitializing: false }));
+            return undefined;
         }
-    }, [isLoading, width, height, memoizedData, onNodeClick, updateForcesForNode]); // Use memoizedData in deps
-
-    if (isLoading) {
-        return (
-            <div className={spaceMono.className} style={{ 
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: 'flex', 
-                flexDirection: 'column',
-                alignItems: 'center', 
-                justifyContent: 'center',
-                background: '#0a0a0a',
-                color: '#e5e7eb',
-                margin: 0,
-                padding: 0,
-                overflow: 'hidden'
-            }}>
-                <div style={{
-                    position: 'absolute',
-                    top: '1rem',
-                    left: '1rem',
-                    fontSize: '1.25rem',
-                    fontWeight: 'bold',
-                    zIndex: 10
-                }}>
-                    Architecture Wikigraph
-                </div>
-                <div style={{
-                    fontSize: '1.25rem'
-                }}>
-                    <LoadingText />
-                </div>
-            </div>
-        );
-    }
+    }, [loadingState.graphModuleLoading, width, height, memoizedData, onNodeClick, updateForcesForNode]);
 
     return (
         <div className={spaceMono.className}>
+            <LoadingOverlay loadingState={loadingState} />
             <div style={{ 
                 position: 'fixed',
                 top: 0,
@@ -232,34 +195,38 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
                 }} />
             </div>
             
-            {/* Title */}
-            <div style={{
-                position: 'fixed',
-                top: '1rem',
-                left: '1rem',
-                color: '#e5e7eb',
-                fontSize: '1.25rem',
-                fontWeight: 'bold',
-                zIndex: 10,
-                pointerEvents: 'none'
-            }}>
-                Architecture Wikigraph
-            </div>
+            {!Object.values(loadingState).some(state => state) && (
+                <>
+                    {/* Title */}
+                    <div style={{
+                        position: 'fixed',
+                        top: '1rem',
+                        left: '1rem',
+                        color: '#e5e7eb',
+                        fontSize: '1.25rem',
+                        fontWeight: 'bold',
+                        zIndex: 10,
+                        pointerEvents: 'none'
+                    }}>
+                        Architecture Wikigraph
+                    </div>
 
-            {/* Author Credit */}
-            <div style={{
-                position: 'fixed',
-                bottom: '0.5rem',
-                right: '0.5rem',
-                color: '#9ca3af',
-                fontSize: '0.5rem',
-                fontWeight: 'bold',
-                zIndex: 10,
-                textAlign: 'right',
-                pointerEvents: 'none'
-            }}>
-                "A SANDHEEP RAJKUMAR PROJECT"
-            </div>
+                    {/* Author Credit */}
+                    <div style={{
+                        position: 'fixed',
+                        bottom: '0.5rem',
+                        right: '0.5rem',
+                        color: '#9ca3af',
+                        fontSize: '0.5rem',
+                        fontWeight: 'bold',
+                        zIndex: 10,
+                        textAlign: 'right',
+                        pointerEvents: 'none'
+                    }}>
+                        "A SANDHEEP RAJKUMAR PROJECT"
+                    </div>
+                </>
+            )}
         </div>
     );
 };

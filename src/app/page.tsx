@@ -4,15 +4,11 @@ import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Space_Mono } from 'next/font/google';
 import { GraphData, Node } from '../types/graph';
+import { LoadingOverlay, LoadingState } from '../components/LoadingOverlay';
 
 // Dynamically import the Graph component with no SSR
 const Graph = dynamic(() => import('../components/Graph'), {
   ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center w-full h-full bg-[#0a0a0a] text-gray-200">
-      Loading Graph Component...
-    </div>
-  ),
 });
 
 const spaceMono = Space_Mono({
@@ -23,14 +19,17 @@ const spaceMono = Space_Mono({
 export default function Home() {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const [loading, setLoading] = useState(true);
+  const [loadingState, setLoadingState] = useState<LoadingState>({
+    dataLoading: true,
+    graphModuleLoading: true,
+    graphInitializing: true
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Load graph data
     const loadGraphData = async () => {
       try {
-        setLoading(true);
         setError(null);
         const response = await fetch('/graph.json');
         if (!response.ok) {
@@ -42,11 +41,11 @@ export default function Home() {
           throw new Error('Invalid graph data structure');
         }
         setGraphData(data);
+        setLoadingState(prev => ({ ...prev, dataLoading: false }));
       } catch (error) {
         console.error('Error loading graph data:', error);
         setError(error instanceof Error ? error.message : 'Failed to load graph data');
-      } finally {
-        setLoading(false);
+        setLoadingState(prev => ({ ...prev, dataLoading: false }));
       }
     };
 
@@ -76,19 +75,6 @@ export default function Home() {
     window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(node.id)}`, '_blank');
   };
 
-  if (loading) {
-    return (
-      <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
-        <div className="absolute top-4 left-4 text-xl font-bold z-10">
-          Architecture Wikigraph
-        </div>
-        <div className="text-center">
-          <div className="text-xl">Loading graph data...</div>
-        </div>
-      </main>
-    );
-  }
-
   if (error) {
     return (
       <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
@@ -111,18 +97,13 @@ export default function Home() {
 
   return (
     <main className={`fixed inset-0 overflow-hidden bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
-      <div className="absolute top-4 left-4 text-xl font-bold z-10">
-        Architecture Wikigraph
-      </div>
+      <LoadingOverlay loadingState={loadingState} />
       <Graph
         width={dimensions.width}
         height={dimensions.height}
         data={graphData}
         onNodeClick={handleNodeClick}
       />
-      <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-bold z-10">
-        "A SANDHEEP RAJKUMAR PROJECT"
-      </div>
     </main>
   );
 } 
