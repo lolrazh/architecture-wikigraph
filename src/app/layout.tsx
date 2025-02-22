@@ -9,7 +9,7 @@ const spaceMono = Space_Mono({
 
 export const metadata = {
   title: 'Architecture Wikigraph',
-  description: 'Created by Sandheep Rajkumar',
+  description: 'Interactive visualization of architectural concepts'
 }
 
 export default function RootLayout({

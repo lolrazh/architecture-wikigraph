@@ -2,28 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 229, 231, 235;
-  --background-rgb: 0, 0, 0;
+/* Base styles */
+* {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+}
+
+html,
+body {
+    max-width: 100vw;
+    overflow: hidden;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+    background: #0a0a0a;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+    color: #e5e7eb;
+    background: #0a0a0a;
 }
 
 /* Custom styles for graph nodes */
 .node-label {
-  user-select: none;
-  pointer-events: none;
+    user-select: none;
+    pointer-events: none;
 }
 
 /* Smooth transitions for interactions */
 circle {
-  transition: r 0.2s ease-in-out, stroke-width 0.2s ease-in-out;
+    transition: r 0.2s ease-in-out, stroke-width 0.2s ease-in-out;
 }
 
 circle:hover {
-  stroke-width: 1.5;
-  cursor: pointer;
+    stroke-width: 1.5;
+    cursor: pointer;
 } 

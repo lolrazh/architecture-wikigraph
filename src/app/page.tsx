@@ -5,9 +5,27 @@ import dynamic from 'next/dynamic';
 import { Space_Mono } from 'next/font/google';
 import { GraphData, Node } from '../types/graph';
 
+const LoadingScreen = () => {
+  const [dots, setDots] = useState('');
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(prev => prev.length >= 3 ? '' : prev + '.');
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <main className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200">
+      <div className="text-xl">Loading graph{dots}</div>
+    </main>
+  );
+};
+
 // Dynamically import the Graph component with no SSR
-const Graph = dynamic(() => import('../components/Graph').then(mod => mod.Graph), {
+const Graph = dynamic(() => import('../components/Graph'), {
   ssr: false,
+  loading: () => <LoadingScreen />
 });
 
 const spaceMono = Space_Mono({
@@ -72,24 +90,12 @@ export default function Home() {
   };
 
   if (loading) {
-    return (
-      <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
-        <div className="absolute top-4 left-4 text-xl font-bold z-10">
-          Architecture Wikigraph
-        </div>
-        <div className="text-center">
-          <div className="text-xl">Loading graph data...</div>
-        </div>
-      </main>
-    );
+    return <LoadingScreen />;
   }
 
   if (error) {
     return (
       <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
-        <div className="absolute top-4 left-4 text-xl font-bold z-10">
-          Architecture Wikigraph
-        </div>
         <div className="text-center">
           <div className="mb-4 text-xl text-red-500">Error</div>
           <div className="text-gray-400">{error}</div>
@@ -115,9 +121,6 @@ export default function Home() {
         data={graphData}
         onNodeClick={handleNodeClick}
       />
-      <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-bold z-10">
-        "A SANDHEEP RAJKUMAR PROJECT"
-      </div>
     </main>
   );
 } 

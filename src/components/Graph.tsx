@@ -1,71 +1,211 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
-import ForceGraph3D from '3d-force-graph';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { GraphProps, Node } from '../types/graph';
+import { QuadTree } from '../lib/quadtree';
+import { ForceCalculator } from '../lib/force.calculator';
+import { Space_Mono } from 'next/font/google';
+
+const spaceMono = Space_Mono({
+    weight: '400',
+    subsets: ['latin'],
+});
 
 // Helper function to get node color based on depth
 function getNodeColor(depth: number): string {
-  switch (depth) {
-    case 0: return '#96bfea'; // Root (Architecture) - Light blue
-    case 1: return '#a0c7a9'; // Direct connections - Sage green
-    case 2: return '#e1acdc'; // Secondary connections - Light purple
-    default: return '#94a3b8'; // Default - Gray
-  }
+    switch (depth) {
+        case 0: return '#96bfea'; // Root (Architecture) - Light blue
+        case 1: return '#a0c7a9'; // Direct connections - Sage green
+        case 2: return '#e1acdc'; // Secondary connections - Light purple
+        default: return '#94a3b8'; // Default - Gray
+    }
 }
 
-// Helper function to get node size based on depth
-function getNodeSize(node: Node): number {
-  switch (node.depth) {
-    case 0: return 25; // Root node (Architecture) - Much bigger
-    case 1: return 10; // Direct connections
-    case 2: return 6;  // Secondary connections
-    default: return 4;
-  }
+const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const graphRef = useRef<any>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const ForceGraph3DRef = useRef<any>(null);
+    const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
+        theta: 0.5,
+        repulsionStrength: 1,
+        attractionStrength: 0.1
+    }));
+
+    // Memoize data to prevent unnecessary updates
+    const memoizedData = useMemo(() => data, [
+        data.nodes.length,
+        data.links.length
+    ]);
+
+    const updateForcesForNode = useCallback((movedNode: Node) => {
+        if (!memoizedData.nodes || !memoizedData.links) return;
+
+        // Create quadtree only for nodes within influence radius
+        const influenceRadius = 100; // Adjust based on your needs
+        const affectedNodes = memoizedData.nodes.filter(node => {
+            if (node === movedNode) return true;
+            const dx = (node.x || 0) - (movedNode.x || 0);
+            const dz = (node.z || 0) - (movedNode.z || 0);
+            return Math.sqrt(dx * dx + dz * dz) < influenceRadius;
+        });
+
+        // Create local quadtree for affected region
+        const localBounds = calculateBounds(affectedNodes);
+        const quadTree = new QuadTree({
+            x: (localBounds.maxX + localBounds.minX) / 2,
+            y: (localBounds.maxZ + localBounds.minZ) / 2,
+            width: Math.max(localBounds.maxX - localBounds.minX, localBounds.maxZ - localBounds.minZ) * 1.1
+        });
+
+        // Insert affected nodes
+        affectedNodes.forEach(node => {
+            if (node.x !== undefined && node.z !== undefined) {
+                quadTree.insert({
+                    x: node.x,
+                    y: node.z,
+                    mass: 1
+                });
+            }
+        });
+
+        // Calculate forces only for affected nodes
+        affectedNodes.forEach(node => {
+            if (node.x === undefined || node.z === undefined) return;
+
+            const point = { x: node.x, y: node.z, mass: 1 };
+            const force = forceCalculatorRef.current.calculateForces(point, quadTree.root);
+
+            // Apply forces with damping
+            const damping = 0.9;
+            node.vx = ((node.vx || 0) + force.fx) * damping;
+            node.vz = ((node.vz || 0) + force.fy) * damping;
+            node.x += node.vx;
+            node.z += node.vz;
+        });
+
+        // Update affected edges
+        const affectedLinks = memoizedData.links.filter(link => {
+            const source = memoizedData.nodes.find(n => n.id === link.source);
+            const target = memoizedData.nodes.find(n => n.id === link.target);
+            return affectedNodes.includes(source!) || affectedNodes.includes(target!);
+        });
+
+        affectedLinks.forEach(link => {
+            const source = memoizedData.nodes.find(n => n.id === link.source);
+            const target = memoizedData.nodes.find(n => n.id === link.target);
+            
+            if (!source || !target || source.x === undefined || source.z === undefined || 
+                target.x === undefined || target.z === undefined) return;
+
+            const force = forceCalculatorRef.current.calculateAttraction({
+                source: { x: source.x, y: source.z, mass: 1 },
+                target: { x: target.x, y: target.z, mass: 1 }
+            });
+
+            // Apply attraction forces
+            source.vx = (source.vx || 0) + force.fx;
+            source.vz = (source.vz || 0) + force.fy;
+            target.vx = (target.vx || 0) - force.fx;
+            target.vz = (target.vz || 0) - force.fy;
+        });
+
+        // Refresh graph
+        if (graphRef.current) {
+            graphRef.current.refresh();
+        }
+    }, [memoizedData.nodes, memoizedData.links]);
+
+    // Load ForceGraph3D module once
+    useEffect(() => {
+        import('3d-force-graph').then(module => {
+            ForceGraph3DRef.current = module.default;
+            setIsLoading(false);
+        }).catch(error => {
+            console.error('Failed to load ForceGraph3D:', error);
+            setIsLoading(false);
+        });
+    }, []);
+
+    // Initialize graph when container and module are ready
+    useEffect(() => {
+        if (isLoading || !containerRef.current || !ForceGraph3DRef.current) {
+            return undefined; // Early return with undefined for cleanup
+        }
+
+        try {
+            const graph = ForceGraph3DRef.current()(containerRef.current)
+                .width(width)
+                .height(height)
+                .graphData(memoizedData) // Use memoized data
+                .nodeColor((node: Node) => getNodeColor(node.depth))
+                .nodeLabel((node: Node) => node.id)
+                .nodeResolution(8)
+                .backgroundColor('#000000')
+                .onNodeClick((node: Node) => onNodeClick && onNodeClick(node))
+                .onNodeDragEnd((node: Node) => {
+                    updateForcesForNode(node);
+                });
+
+            graphRef.current = graph;
+
+            return () => {
+                if (graphRef.current) {
+                    graphRef.current._destructor();
+                }
+            };
+        } catch (error) {
+            console.error('Error initializing graph:', error);
+            return undefined; // Return undefined in case of error
+        }
+    }, [isLoading, width, height, memoizedData, onNodeClick, updateForcesForNode]); // Use memoizedData in deps
+
+    if (isLoading) {
+        return null;
+    }
+
+    return (
+        <div className={spaceMono.className}>
+            <div style={{ 
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: '#0a0a0a',
+                margin: 0,
+                padding: 0,
+                overflow: 'hidden'
+            }}>
+                <div ref={containerRef} style={{ 
+                    width: '100%', 
+                    height: '100%',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0
+                }} />
+            </div>
+        </div>
+    );
+};
+
+// Helper function to calculate bounds
+function calculateBounds(nodes: Node[]) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+
+    nodes.forEach(node => {
+        if (node.x !== undefined && node.z !== undefined) {
+            minX = Math.min(minX, node.x);
+            maxX = Math.max(maxX, node.x);
+            minZ = Math.min(minZ, node.z);
+            maxZ = Math.max(maxZ, node.z);
+        }
+    });
+
+    return { minX, maxX, minZ, maxZ };
 }
 
-export const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const graphRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Initialize the force graph
-    const graph = ForceGraph3D()(containerRef.current)
-      // Set dimensions
-      .width(width)
-      .height(height)
-      // Set background color
-      .backgroundColor('#0a0a0a')
-      // Node styling
-      .nodeColor((node: any) => getNodeColor((node as Node).depth))
-      .nodeVal((node: any) => getNodeSize(node as Node))
-      .nodeLabel(node => (node as Node).id.replace(/_/g, ' '))
-      // Link styling
-      .linkColor(() => '#cbd5e1') // Lighter gray for edges
-      .linkOpacity(0.4) // Reduced opacity
-      .linkWidth(0.5)   // Thinner links
-      // Add interaction and data
-      .onNodeClick((node: any) => onNodeClick?.(node as Node))
-      .graphData(data);
-
-    // Configure forces - Adjust to accommodate larger root node
-    graph.d3Force('charge')?.strength(-3000).distanceMax(500);
-    graph.d3Force('link')?.distance(300); // Increased distance
-    graph.d3Force('center')?.strength(1);
-    graph.d3Force('collide')?.radius(80); // Increased collision radius
-
-    // Store reference for cleanup
-    graphRef.current = graph;
-
-    // Cleanup
-    return () => {
-      if (graphRef.current) {
-        graphRef.current._destructor();
-      }
-    };
-  }, [width, height, data, onNodeClick]);
-
-  return <div ref={containerRef} />;
-}; 
+export default Graph; 
