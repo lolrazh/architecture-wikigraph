@@ -141,15 +141,23 @@ export default function Home() {
       const sim = d3.forceSimulation<Node>(data.nodes)
         .force('link', d3.forceLink<Node, Link>(processedLinks)
           .id(d => d.id)
-          .distance(200)
+          .distance(250)  // Much larger distance to spread things out
         )
         .force('charge', d3.forceManyBody<Node>()
-          .strength(-2000)
+          .strength(-3000)  // Much stronger repulsion
+          .distanceMax(500)  // Larger repulsion range
         )
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide(50))
-        .alpha(1)    // Start at full energy
-        .alphaDecay(0.01);  // Slower decay for smoother animation
+        .force('collision', d3.forceCollide(60))  // Larger collision radius
+        .velocityDecay(0.7)  // Keep high friction
+        .alpha(0.75)  // More initial energy
+        .alphaDecay(0.15)  // Slightly slower decay
+        .alphaMin(0.05);  // Same stop threshold
+
+      // Run more initial ticks for better starting layout
+      for (let i = 0; i < 20; i++) {
+        sim.tick();
+      }
 
       setSimulation(sim);
       setGraphData({ nodes: data.nodes, links: processedLinks });
