@@ -73,7 +73,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <main className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200">
+      <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
         <div className="text-center">
           <div className="mb-4 text-xl">Loading graph data...</div>
           <div className="text-gray-400">Please wait while we prepare the visualization</div>
@@ -84,7 +84,7 @@ export default function Home() {
 
   if (error) {
     return (
-      <main className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200">
+      <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
         <div className="text-center">
           <div className="mb-4 text-xl text-red-500">Error</div>
           <div className="text-gray-400">{error}</div>
@@ -100,15 +100,15 @@ export default function Home() {
   }
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-[#0a0a0a] text-gray-200">
+    <main className={`fixed inset-0 overflow-hidden bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
       <Graph
         width={dimensions.width}
         height={dimensions.height}
         data={graphData}
         onNodeClick={handleNodeClick}
       />
-      <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-medium">
-        A SANDHEEP RAJKUMAR PROJECT
+      <div className="absolute bottom-2 right-2 text-[8px] text-gray-400 font-bold">
+        "A SANDHEEP RAJKUMAR PROJECT"
       </div>
     </main>
   );

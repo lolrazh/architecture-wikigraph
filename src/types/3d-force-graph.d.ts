@@ -21,6 +21,7 @@ declare module '3d-force-graph' {
     height(height: number): this;
     backgroundColor(color: string): this;
     nodeAutoColorBy(field: string): this;
+    nodeColor(fn: (node: any) => string): this;
     nodeVal(fn: (node: any) => number): this;
     nodeLabel(fn: (node: any) => string): this;
     linkColor(fn: () => string): this;

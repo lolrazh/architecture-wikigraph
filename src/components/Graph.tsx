@@ -7,10 +7,10 @@ import { GraphProps, Node } from '../types/graph';
 // Helper function to get node color based on depth
 function getNodeColor(depth: number): string {
   switch (depth) {
-    case 0: return '#94a3b8'; // Root (Architecture)
-    case 1: return '#fca5a5'; // Direct connections
-    case 2: return '#86efac'; // Secondary connections
-    default: return '#94a3b8';
+    case 0: return '#96bfea'; // Root (Architecture) - Light blue
+    case 1: return '#a0c7a9'; // Direct connections - Sage green
+    case 2: return '#e1acdc'; // Secondary connections - Light purple
+    default: return '#94a3b8'; // Default - Gray
   }
 }
 
@@ -39,11 +39,11 @@ export const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }
       // Set background color
       .backgroundColor('#0a0a0a')
       // Node styling
-      .nodeAutoColorBy('depth')
+      .nodeColor((node: any) => getNodeColor((node as Node).depth))
       .nodeVal((node: any) => getNodeSize(node as Node))
       .nodeLabel(node => (node as Node).id.replace(/_/g, ' '))
       // Link styling
-      .linkColor(() => '#94a3b8')
+      .linkColor(() => '#cbd5e1') // Lighter gray for edges
       .linkOpacity(0.4) // Reduced opacity
       .linkWidth(0.5)   // Thinner links
       // Add interaction and data
