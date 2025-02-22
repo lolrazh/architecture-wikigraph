@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { SimulationNodeDatum } from 'd3-force';
+import { Selection } from 'd3';
 import { Space_Mono } from 'next/font/google';
 
 const spaceMono = Space_Mono({
@@ -10,16 +10,13 @@ const spaceMono = Space_Mono({
   subsets: ['latin'],
 });
 
-// Add type definitions for D3 value functions
-type D3ValueFn<T, U> = d3.ValueFn<d3.BaseType, T, U>;
-
-// Add type definitions for the simplified data format
-type NodeCategory = 'root' | 'architecture';
+// Maximum depth of nodes to display
+const MAX_DEPTH = 1;
 
 interface NodeData {
   id: string;
   depth: number;
-  category: NodeCategory;
+  category: 'root' | 'architecture';
   loaded?: boolean;
   x?: number;
   y?: number;
@@ -43,40 +40,6 @@ interface GraphData {
 
 function denormalizeTitle(title: string): string {
   return title.replace(/_/g, ' ');
-}
-
-// Function to wrap text
-function wrap(text: d3.Selection<SVGTextElement, Node, SVGGElement, unknown>, width: number) {
-  text.each(function() {
-    const text = d3.select(this);
-    const words = text.text().split(/\s+/);
-    const lineHeight = 1.1; // ems
-    const y = text.attr('y');
-    const dy = parseFloat(text.attr('dy') || '0');
-
-    let line: string[] = [];
-    let lineNumber = 0;
-    let tspan = text.text(null).append('tspan')
-      .attr('x', 0)
-      .attr('y', y)
-      .attr('dy', dy + 'em');
-
-    words.forEach((word, i) => {
-      line.push(word);
-      tspan.text(line.join(' '));
-
-      if ((tspan.node()?.getComputedTextLength() || 0) > width) {
-        line.pop();
-        tspan.text(line.join(' '));
-        line = [word];
-        tspan = text.append('tspan')
-          .attr('x', 0)
-          .attr('y', y)
-          .attr('dy', ++lineNumber * lineHeight + dy + 'em')
-          .text(word);
-      }
-    });
-  });
 }
 
 export default function Home() {
@@ -139,7 +102,7 @@ export default function Home() {
       // Setup SVG
       const width = window.innerWidth;
       const height = window.innerHeight;
-      const svg = d3.select(svgRef.current)
+      const svg = d3.select<SVGSVGElement, unknown>(svgRef.current)
         .attr('width', width)
         .attr('height', height);
 
@@ -164,18 +127,27 @@ export default function Home() {
       });
 
       // Process links to use node references instead of string IDs
-      const processedLinks = data.links.map((link: any) => {
-        const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
-        const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
-        return {
-          ...link,
-          source: sourceNode || link.source,
-          target: targetNode || link.target
-        };
-      });
+      const processedLinks = data.links
+        .filter((link: any) => {
+          const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
+          const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
+          return sourceNode?.depth <= MAX_DEPTH && targetNode?.depth <= MAX_DEPTH;
+        })
+        .map((link: any) => {
+          const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
+          const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
+          return {
+            ...link,
+            source: sourceNode || link.source,
+            target: targetNode || link.target
+          };
+        });
+
+      // Filter nodes to respect MAX_DEPTH
+      const filteredNodes = data.nodes.filter((node: Node) => node.depth <= MAX_DEPTH);
 
       // Create simulation with stronger initial forces for better layout
-      const sim = d3.forceSimulation<Node>(data.nodes)
+      const sim = d3.forceSimulation<Node>(filteredNodes)
         .force('link', d3.forceLink<Node, Link>(processedLinks)
           .id(d => d.id)
           .distance(200)
@@ -187,7 +159,7 @@ export default function Home() {
         .force('collision', d3.forceCollide(50));
 
       setSimulation(sim);
-      setGraphData({ nodes: data.nodes, links: processedLinks });
+      setGraphData({ nodes: filteredNodes, links: processedLinks });
 
       // Color scheme based on depth
       const getNodeColor = (depth: number): string => {
@@ -204,63 +176,65 @@ export default function Home() {
         .selectAll<SVGLineElement, Link>('line')
         .data(processedLinks)
         .join('line')
-        .attr('stroke', 'rgba(255, 255, 255, 0.3)')
-        .attr('stroke-width', 1);
+        .attr('stroke', '#94a3b8')
+        .attr('stroke-width', 1.5)
+        .attr('opacity', 0.6) as Selection<SVGLineElement, Link, SVGGElement, unknown>;
 
       // Create nodes
       const nodes = g.append('g')
         .selectAll<SVGGElement, Node>('g')
-        .data(data.nodes)
-        .join('g')
-        .call(d3.drag<SVGGElement, Node>()
-          .on('start', (event, d) => {
-            if (!event.active) sim.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on('drag', (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on('end', (event, d) => {
-            if (!event.active) sim.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }) as any);
+        .data(filteredNodes)
+        .join('g') as Selection<SVGGElement, Node, SVGGElement, unknown>;
+
+      // Add drag behavior
+      nodes.call(d3.drag<SVGGElement, Node>()
+        .on('start', (event, d) => {
+          if (!event.active && sim) sim.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on('drag', (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on('end', (event, d) => {
+          if (!event.active && sim) sim.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        }));
 
       // Add circles to nodes
       nodes.append('circle')
-        .attr('r', function(d: Node) { return d.category === 'root' ? 12 : 8; } as any)
-        .attr('fill', function(d: Node) { return getNodeColor(d.depth); } as any)
+        .attr('r', (d) => d.category === 'root' ? 12 : 8)
+        .attr('fill', (d) => getNodeColor(d.depth))
         .attr('stroke', '#fff')
         .attr('stroke-width', 1);
 
       // Add labels
       nodes.append('text')
-        .text(function(d: Node) { return denormalizeTitle(d.id); } as any)
+        .text((d) => denormalizeTitle(d.id))
         .attr('x', 0)
-        .attr('y', function(d: Node) { return d.category === 'root' ? 24 : 20; } as any)
+        .attr('y', (d) => d.category === 'root' ? 24 : 20)
         .attr('text-anchor', 'middle')
         .attr('fill', '#fff')
-        .attr('font-size', function(d: Node) { return d.category === 'root' ? '14px' : '12px'; } as any)
+        .attr('font-size', (d) => d.category === 'root' ? '14px' : '12px')
         .style('pointer-events', 'none');
 
       // Add click handler for Wikipedia links
-      nodes.on('click', function(this: SVGGElement, event: any, d: Node) {
+      nodes.on('click', function(this: SVGGElement, event: MouseEvent, d: Node) {
         window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(d.id)}`, '_blank');
       });
 
-      // Update positions on tick
+      // Update positions on each tick
       sim.on('tick', () => {
         links
-          .attr('x1', function(d: Link) { return (d.source as Node).x!; })
-          .attr('y1', function(d: Link) { return (d.source as Node).y!; })
-          .attr('x2', function(d: Link) { return (d.target as Node).x!; })
-          .attr('y2', function(d: Link) { return (d.target as Node).y!; });
+          .attr('x1', d => (d.source as Node).x || 0)
+          .attr('y1', d => (d.source as Node).y || 0)
+          .attr('x2', d => (d.target as Node).x || 0)
+          .attr('y2', d => (d.target as Node).y || 0);
 
-        nodes.attr('transform', function(d: Node) { 
-          return `translate(${d.x},${d.y})`; 
-        });
+        nodes
+          .attr('transform', d => `translate(${d.x || 0},${d.y || 0})`);
       });
 
       // Handle window resize
