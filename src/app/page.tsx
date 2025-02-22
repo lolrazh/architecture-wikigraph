@@ -116,9 +116,9 @@ export default function Home() {
 
       svg.call(zoom);
 
-      // Fetch all graph data
-      console.log('Loading complete graph data...');
-      const response = await fetch('/api/node-connections?id=Architecture');
+      // Load graph data directly
+      console.log('Loading depth 0-1 graph data...');
+      const response = await fetch('/graph_depth0_1.json');
       const data = await response.json();
       
       console.log('Received graph data:', {
@@ -127,27 +127,18 @@ export default function Home() {
       });
 
       // Process links to use node references instead of string IDs
-      const processedLinks = data.links
-        .filter((link: any) => {
-          const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
-          const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
-          return sourceNode?.depth <= MAX_DEPTH && targetNode?.depth <= MAX_DEPTH;
-        })
-        .map((link: any) => {
-          const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
-          const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
-          return {
-            ...link,
-            source: sourceNode || link.source,
-            target: targetNode || link.target
-          };
-        });
-
-      // Filter nodes to respect MAX_DEPTH
-      const filteredNodes = data.nodes.filter((node: Node) => node.depth <= MAX_DEPTH);
+      const processedLinks = data.links.map((link: any) => {
+        const sourceNode = data.nodes.find((n: Node) => n.id === getNodeId(link.source));
+        const targetNode = data.nodes.find((n: Node) => n.id === getNodeId(link.target));
+        return {
+          ...link,
+          source: sourceNode || link.source,
+          target: targetNode || link.target
+        };
+      });
 
       // Create simulation with stronger initial forces for better layout
-      const sim = d3.forceSimulation<Node>(filteredNodes)
+      const sim = d3.forceSimulation<Node>(data.nodes)
         .force('link', d3.forceLink<Node, Link>(processedLinks)
           .id(d => d.id)
           .distance(200)
@@ -156,10 +147,12 @@ export default function Home() {
           .strength(-2000)
         )
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide(50));
+        .force('collision', d3.forceCollide(50))
+        .alpha(1)    // Start at full energy
+        .alphaDecay(0.01);  // Slower decay for smoother animation
 
       setSimulation(sim);
-      setGraphData({ nodes: filteredNodes, links: processedLinks });
+      setGraphData({ nodes: data.nodes, links: processedLinks });
 
       // Color scheme based on depth
       const getNodeColor = (depth: number): string => {
@@ -183,7 +176,7 @@ export default function Home() {
       // Create nodes
       const nodes = g.append('g')
         .selectAll<SVGGElement, Node>('g')
-        .data(filteredNodes)
+        .data(data.nodes)
         .join('g') as Selection<SVGGElement, Node, SVGGElement, unknown>;
 
       // Add drag behavior
