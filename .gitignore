@@ -7,5 +7,4 @@ node_modules/
 
 # Project specific
 data/
-public/*.json
-!public/graph.json
+public/graph.json
