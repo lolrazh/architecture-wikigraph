@@ -14,6 +14,7 @@ export class ForceCalculator {
     private theta: number = 0.5;  // Barnes-Hut threshold
     private repulsionStrength: number = 1;
     private attractionStrength: number = 0.1;
+    private disposed: boolean = false;
 
     constructor(config?: { theta?: number; repulsionStrength?: number; attractionStrength?: number; }) {
         if (config) {
@@ -23,7 +24,21 @@ export class ForceCalculator {
         }
     }
 
+    dispose(): void {
+        this.disposed = true;
+        this.theta = 0;
+        this.repulsionStrength = 0;
+        this.attractionStrength = 0;
+    }
+
+    private checkDisposed(): void {
+        if (this.disposed) {
+            throw new Error('ForceCalculator has been disposed');
+        }
+    }
+
     calculateForces(node: Point, quadNode: QuadTreeNode): Force {
+        this.checkDisposed();
         // If node has no mass, skip calculation
         if (quadNode.mass === 0) return { fx: 0, fy: 0 };
 
@@ -54,6 +69,7 @@ export class ForceCalculator {
     }
 
     calculateAttraction(edge: Edge): Force {
+        this.checkDisposed();
         const dx = edge.target.x - edge.source.x;
         const dy = edge.target.y - edge.source.y;
         const distance = Math.sqrt(dx * dx + dy * dy);

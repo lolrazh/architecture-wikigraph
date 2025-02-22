@@ -57,6 +57,15 @@ export class QuadTree {
     }
 
     /**
+     * Clear all points and reset the tree
+     */
+    dispose(): void {
+        this.root = new QuadTreeNode(this.root.boundary);
+        this.totalPoints = 0;
+        this.needsMassUpdate = false;
+    }
+
+    /**
      * Insert multiple points at once
      */
     insertBatch(points: Point[]): void {

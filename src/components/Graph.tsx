@@ -22,16 +22,25 @@ function getNodeColor(depth: number): string {
     }
 }
 
+// Resource cleanup utility
+const cleanupResources = (nodes: Node[]) => {
+    nodes.forEach(node => {
+        // Clear velocity vectors
+        node.vx = undefined;
+        node.vz = undefined;
+        
+        // Clear any cached calculations
+        delete (node as any)._force;
+        delete (node as any)._quadtreeRef;
+    });
+};
+
 const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<any>(null);
     const ForceGraph3DRef = useRef<any>(null);
-    const [loadingState, setLoadingState] = useState<LoadingState>({
-        dataLoading: false,
-        graphModuleLoading: true,
-        graphInitializing: true
-    });
-
+    const quadTreeRef = useRef<QuadTree | null>(null);
+    const animationFrameRef = useRef<number>();
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
         theta: 0.5,
         repulsionStrength: 1,
@@ -44,8 +53,19 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
         data.links.length
     ]);
 
+    // Cleanup function for QuadTree
+    const cleanupQuadTree = useCallback(() => {
+        if (quadTreeRef.current) {
+            quadTreeRef.current.dispose();
+            quadTreeRef.current = null;
+        }
+    }, []);
+
     const updateForcesForNode = useCallback((movedNode: Node) => {
         if (!memoizedData.nodes || !memoizedData.links) return;
+
+        // Cleanup previous QuadTree before creating new one
+        cleanupQuadTree();
 
         // Create quadtree only for nodes within influence radius
         const influenceRadius = 100; // Adjust based on your needs
@@ -58,7 +78,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
 
         // Create local quadtree for affected region
         const localBounds = calculateBounds(affectedNodes);
-        const quadTree = new QuadTree({
+        quadTreeRef.current = new QuadTree({
             x: (localBounds.maxX + localBounds.minX) / 2,
             y: (localBounds.maxZ + localBounds.minZ) / 2,
             width: Math.max(localBounds.maxX - localBounds.minX, localBounds.maxZ - localBounds.minZ) * 1.1
@@ -67,7 +87,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
         // Insert affected nodes
         affectedNodes.forEach(node => {
             if (node.x !== undefined && node.z !== undefined) {
-                quadTree.insert({
+                quadTreeRef.current?.insert({
                     x: node.x,
                     y: node.z,
                     mass: 1
@@ -80,47 +100,36 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             if (node.x === undefined || node.z === undefined) return;
 
             const point = { x: node.x, y: node.z, mass: 1 };
-            const force = forceCalculatorRef.current.calculateForces(point, quadTree.root);
+            if (quadTreeRef.current?.root) {
+                const force = forceCalculatorRef.current.calculateForces(point, quadTreeRef.current.root);
 
-            // Apply forces with damping
-            const damping = 0.9;
-            node.vx = ((node.vx || 0) + force.fx) * damping;
-            node.vz = ((node.vz || 0) + force.fy) * damping;
-            node.x += node.vx;
-            node.z += node.vz;
+                // Apply forces with damping
+                const damping = 0.9;
+                node.vx = ((node.vx || 0) + force.fx) * damping;
+                node.vz = ((node.vz || 0) + force.fy) * damping;
+                node.x += node.vx;
+                node.z += node.vz;
+            }
         });
 
-        // Update affected edges
-        const affectedLinks = memoizedData.links.filter(link => {
-            const source = memoizedData.nodes.find(n => n.id === link.source);
-            const target = memoizedData.nodes.find(n => n.id === link.target);
-            return affectedNodes.includes(source!) || affectedNodes.includes(target!);
-        });
-
-        affectedLinks.forEach(link => {
-            const source = memoizedData.nodes.find(n => n.id === link.source);
-            const target = memoizedData.nodes.find(n => n.id === link.target);
-            
-            if (!source || !target || source.x === undefined || source.z === undefined || 
-                target.x === undefined || target.z === undefined) return;
-
-            const force = forceCalculatorRef.current.calculateAttraction({
-                source: { x: source.x, y: source.z, mass: 1 },
-                target: { x: target.x, y: target.z, mass: 1 }
-            });
-
-            // Apply attraction forces
-            source.vx = (source.vx || 0) + force.fx;
-            source.vz = (source.vz || 0) + force.fy;
-            target.vx = (target.vx || 0) - force.fx;
-            target.vz = (target.vz || 0) - force.fy;
-        });
-
-        // Refresh graph
-        if (graphRef.current) {
-            graphRef.current.refresh();
+        // Cancel any pending animation frame
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
         }
-    }, [memoizedData.nodes, memoizedData.links]);
+
+        // Schedule next update
+        animationFrameRef.current = requestAnimationFrame(() => {
+            if (graphRef.current) {
+                graphRef.current.refresh();
+            }
+        });
+    }, [memoizedData.nodes, memoizedData.links, cleanupQuadTree]);
+
+    const [loadingState, setLoadingState] = useState<LoadingState>({
+        dataLoading: false,
+        graphModuleLoading: true,
+        graphInitializing: true
+    });
 
     // Load ForceGraph3D module once
     useEffect(() => {
@@ -171,6 +180,34 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             return undefined;
         }
     }, [loadingState.graphModuleLoading, width, height, memoizedData, onNodeClick, updateForcesForNode]);
+
+    // Effect for handling component unmount cleanup
+    useEffect(() => {
+        return () => {
+            // Cleanup animation frame
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+            }
+
+            // Cleanup QuadTree
+            cleanupQuadTree();
+
+            // Cleanup node resources
+            if (memoizedData.nodes) {
+                cleanupResources(memoizedData.nodes);
+            }
+
+            // Cleanup force calculator
+            if (forceCalculatorRef.current) {
+                forceCalculatorRef.current.dispose();
+            }
+
+            // Cleanup 3D graph
+            if (graphRef.current) {
+                graphRef.current.dispose();
+            }
+        };
+    }, [cleanupQuadTree, memoizedData.nodes]);
 
     return (
         <div className={spaceMono.className}>
