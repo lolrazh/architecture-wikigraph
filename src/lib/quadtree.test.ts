@@ -1,4 +1,5 @@
-import { QuadTree, Point, Boundary } from './quadtree';
+/// <reference types="jest" />
+import { QuadTree, Point, Boundary, QuadTreeNode } from './quadtree';
 
 describe('QuadTree', () => {
     let boundary: Boundary;
@@ -113,7 +114,7 @@ describe('QuadTree', () => {
             points.forEach(point => quadTree.insert(point));
 
             // Helper function to get tree depth
-            const getDepth = (node: any): number => {
+            const getDepth = (node: QuadTreeNode): number => {
                 if (node.isLeaf()) return 0;
                 return 1 + Math.max(...node.children.map(getDepth));
             };

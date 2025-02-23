@@ -6,38 +6,40 @@ import { GraphData, Node, Link } from '../../../types/graph';
 const graphPath = path.join(process.cwd(), 'public', 'graph.json');
 let cachedGraph: GraphData | null = null;
 
+// Type guard for unknown values
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
 // Validate node structure
-function isValidNode(node: any): node is Node {
-  return (
-    typeof node === 'object' &&
-    node !== null &&
-    typeof node.id === 'string' &&
-    typeof node.depth === 'number' &&
-    (node.category === 'root' || node.category === 'architecture')
-  );
+function isValidNode(node: unknown): node is Node {
+    if (!isObject(node)) return false;
+    return (
+        typeof node.id === 'string' &&
+        typeof node.depth === 'number' &&
+        (node.category === 'root' || node.category === 'architecture')
+    );
 }
 
 // Validate link structure
-function isValidLink(link: any): link is Link {
-  return (
-    typeof link === 'object' &&
-    link !== null &&
-    typeof link.source === 'string' &&
-    typeof link.target === 'string' &&
-    (typeof link.depth === 'undefined' || typeof link.depth === 'number')
-  );
+function isValidLink(link: unknown): link is Link {
+    if (!isObject(link)) return false;
+    return (
+        typeof link.source === 'string' &&
+        typeof link.target === 'string' &&
+        (typeof link.depth === 'undefined' || typeof link.depth === 'number')
+    );
 }
 
 // Validate graph data structure
-function isValidGraphData(data: any): data is GraphData {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    Array.isArray(data.nodes) &&
-    Array.isArray(data.links) &&
-    data.nodes.every(isValidNode) &&
-    data.links.every(isValidLink)
-  );
+function isValidGraphData(data: unknown): data is GraphData {
+    if (!isObject(data)) return false;
+    return (
+        Array.isArray(data.nodes) &&
+        Array.isArray(data.links) &&
+        data.nodes.every(isValidNode) &&
+        data.links.every(isValidLink)
+    );
 }
 
 // Cache the graph data in memory after first load

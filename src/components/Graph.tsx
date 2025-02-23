@@ -6,22 +6,7 @@ import { QuadTree } from '../lib/quadtree';
 import { ForceCalculator } from '../lib/force.calculator';
 import { Space_Mono } from 'next/font/google';
 import { LoadingOverlay, LoadingState } from './LoadingOverlay';
-
-// Define our extended graph interface
-interface ExtendedForceGraph {
-    width(width: number): this;
-    height(height: number): this;
-    graphData(data: any): this;
-    nodeColor(fn: (node: Node) => string): this;
-    nodeLabel(fn: (node: Node) => string): this;
-    backgroundColor(color: string): this;
-    onNodeClick(fn: (node: Node) => void): this;
-    nodeResolution(resolution: number): this;
-    onNodeDragEnd(fn: (node: Node) => void): this;
-    refresh(): void;
-    controls(): { dispose: () => void };
-    _destructor(): void;
-}
+import type { IForceGraph3D } from '3d-force-graph';
 
 interface CachedNode extends Node {
     _force?: { x: number; y: number };
@@ -59,8 +44,9 @@ const cleanupResources = (nodes: Node[]) => {
 
 const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const graphRef = useRef<ExtendedForceGraph | null>(null);
-    const ForceGraph3DRef = useRef<typeof import('3d-force-graph')['default']>();
+    const graphRef = useRef<IForceGraph3D | null>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ForceGraph3DRef = useRef<any>(null);
     const quadTreeRef = useRef<QuadTree | null>(null);
     const animationFrameRef = useRef<number>();
     const isDisposingRef = useRef<boolean>(false);
@@ -174,7 +160,8 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
 
     // Load ForceGraph3D module once
     useEffect(() => {
-        import('3d-force-graph').then(module => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        import('3d-force-graph').then((module: any) => {
             ForceGraph3DRef.current = module.default;
             setLoadingState(prev => ({ ...prev, graphModuleLoading: false }));
         }).catch(error => {
@@ -190,7 +177,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
         }
 
         try {
-            const graph = ForceGraph3DRef.current()(containerRef.current) as unknown as ExtendedForceGraph;
+            const graph = ForceGraph3DRef.current()(containerRef.current);
             
             graph
                 .width(width)
@@ -226,6 +213,9 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
 
     // Effect for handling component unmount cleanup
     useEffect(() => {
+        // Store reference to force calculator that will be cleaned up
+        const forceCalculator = forceCalculatorRef.current;
+        
         return () => {
             isDisposingRef.current = true;
 
@@ -250,8 +240,8 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             }
 
             // Cleanup force calculator last
-            if (forceCalculatorRef.current) {
-                forceCalculatorRef.current.dispose();
+            if (forceCalculator) {
+                forceCalculator.dispose();
             }
         };
     }, [cleanupQuadTree, memoizedData.nodes]);
@@ -314,24 +304,5 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
         </div>
     );
 };
-
-// Helper function to calculate bounds
-function calculateBounds(nodes: Node[]) {
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-
-    nodes.forEach(node => {
-        if (node.x !== undefined && node.z !== undefined) {
-            minX = Math.min(minX, node.x);
-            maxX = Math.max(maxX, node.x);
-            minZ = Math.min(minZ, node.z);
-            maxZ = Math.max(maxZ, node.z);
-        }
-    });
-
-    return { minX, maxX, minZ, maxZ };
-}
 
 export default Graph; 
