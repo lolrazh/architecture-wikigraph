@@ -10,17 +10,34 @@ export interface Edge {
     target: Point;
 }
 
+export interface BatchProcessingConfig {
+    batchSize: number;
+    concurrency: number;
+}
+
 export class ForceCalculator {
     private theta: number = 0.5;  // Barnes-Hut threshold
     private repulsionStrength: number = 1;
     private attractionStrength: number = 0.1;
     private disposed: boolean = false;
+    private batchConfig: BatchProcessingConfig = {
+        batchSize: 50,  // Process 50 nodes at a time
+        concurrency: navigator.hardwareConcurrency || 4  // Use available CPU cores
+    };
 
-    constructor(config?: { theta?: number; repulsionStrength?: number; attractionStrength?: number; }) {
+    constructor(config?: { 
+        theta?: number; 
+        repulsionStrength?: number; 
+        attractionStrength?: number;
+        batchSize?: number;
+        concurrency?: number;
+    }) {
         if (config) {
             this.theta = config.theta ?? this.theta;
             this.repulsionStrength = config.repulsionStrength ?? this.repulsionStrength;
             this.attractionStrength = config.attractionStrength ?? this.attractionStrength;
+            if (config.batchSize) this.batchConfig.batchSize = config.batchSize;
+            if (config.concurrency) this.batchConfig.concurrency = config.concurrency;
         }
     }
 
@@ -34,6 +51,30 @@ export class ForceCalculator {
 
     isDisposed(): boolean {
         return this.disposed;
+    }
+
+    // Process nodes in parallel batches
+    async calculateForcesParallel(nodes: Point[], quadNode: QuadTreeNode): Promise<Force[]> {
+        if (this.disposed) return nodes.map(() => ({ fx: 0, fy: 0 }));
+
+        const batches = this.createBatches(nodes);
+        const results: Force[][] = await Promise.all(
+            batches.map(batch => this.processBatch(batch, quadNode))
+        );
+
+        return results.flat();
+    }
+
+    private createBatches(nodes: Point[]): Point[][] {
+        const batches: Point[][] = [];
+        for (let i = 0; i < nodes.length; i += this.batchConfig.batchSize) {
+            batches.push(nodes.slice(i, i + this.batchConfig.batchSize));
+        }
+        return batches;
+    }
+
+    private async processBatch(nodes: Point[], quadNode: QuadTreeNode): Promise<Force[]> {
+        return nodes.map(node => this.calculateForces(node, quadNode));
     }
 
     calculateForces(node: Point, quadNode: QuadTreeNode): Force {

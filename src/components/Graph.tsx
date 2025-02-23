@@ -7,6 +7,27 @@ import { ForceCalculator } from '../lib/force.calculator';
 import { Space_Mono } from 'next/font/google';
 import { LoadingOverlay, LoadingState } from './LoadingOverlay';
 
+// Define our extended graph interface
+interface ExtendedForceGraph {
+    width(width: number): this;
+    height(height: number): this;
+    graphData(data: any): this;
+    nodeColor(fn: (node: Node) => string): this;
+    nodeLabel(fn: (node: Node) => string): this;
+    backgroundColor(color: string): this;
+    onNodeClick(fn: (node: Node) => void): this;
+    nodeResolution(resolution: number): this;
+    onNodeDragEnd(fn: (node: Node) => void): this;
+    refresh(): void;
+    controls(): { dispose: () => void };
+    _destructor(): void;
+}
+
+interface CachedNode extends Node {
+    _force?: { x: number; y: number };
+    _quadtreeRef?: QuadTree;
+}
+
 const spaceMono = Space_Mono({
     weight: '400',
     subsets: ['latin'],
@@ -25,20 +46,21 @@ function getNodeColor(depth: number): string {
 // Resource cleanup utility
 const cleanupResources = (nodes: Node[]) => {
     nodes.forEach(node => {
+        const cachedNode = node as CachedNode;
         // Clear velocity vectors
         node.vx = undefined;
         node.vz = undefined;
         
         // Clear any cached calculations
-        delete (node as any)._force;
-        delete (node as any)._quadtreeRef;
+        delete cachedNode._force;
+        delete cachedNode._quadtreeRef;
     });
 };
 
 const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const graphRef = useRef<any>(null);
-    const ForceGraph3DRef = useRef<any>(null);
+    const graphRef = useRef<ExtendedForceGraph | null>(null);
+    const ForceGraph3DRef = useRef<typeof import('3d-force-graph')['default']>();
     const quadTreeRef = useRef<QuadTree | null>(null);
     const animationFrameRef = useRef<number>();
     const isDisposingRef = useRef<boolean>(false);
@@ -50,10 +72,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     }));
 
     // Memoize data to prevent unnecessary updates
-    const memoizedData = useMemo(() => data, [
-        data.nodes.length,
-        data.links.length
-    ]);
+    const memoizedData = useMemo(() => data, [data]);
 
     // Cleanup function for QuadTree
     const cleanupQuadTree = useCallback(() => {
@@ -63,7 +82,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
         }
     }, []);
 
-    const updateForcesForNode = useCallback((movedNode: Node) => {
+    const updateForcesForNode = useCallback(async (movedNode: Node) => {
         if (!memoizedData.nodes || !memoizedData.links || isDisposingRef.current) return;
 
         try {
@@ -80,7 +99,14 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             });
 
             // Create local quadtree for affected region
-            const localBounds = calculateBounds(affectedNodes);
+            const localBounds = affectedNodes.reduce((bounds, node) => {
+                bounds.minX = Math.min(bounds.minX, node.x || 0);
+                bounds.maxX = Math.max(bounds.maxX, node.x || 0);
+                bounds.minZ = Math.min(bounds.minZ, node.z || 0);
+                bounds.maxZ = Math.max(bounds.maxZ, node.z || 0);
+                return bounds;
+            }, { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity });
+
             quadTreeRef.current = new QuadTree({
                 x: (localBounds.maxX + localBounds.minX) / 2,
                 y: (localBounds.maxZ + localBounds.minZ) / 2,
@@ -98,24 +124,31 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
                 }
             });
 
-            // Calculate forces only for affected nodes
-            affectedNodes.forEach(node => {
-                if (node.x === undefined || node.z === undefined || !quadTreeRef.current?.root) return;
+            // Calculate forces in parallel for affected nodes
+            if (quadTreeRef.current?.root) {
+                const nodePoints = affectedNodes.map(node => ({
+                    x: node.x ?? 0,  // Use nullish coalescing to handle undefined
+                    y: node.z ?? 0,  // Use nullish coalescing to handle undefined
+                    mass: 1
+                }));
 
-                try {
-                    const point = { x: node.x, y: node.z, mass: 1 };
-                    const force = forceCalculatorRef.current.calculateForces(point, quadTreeRef.current.root);
+                const forces = await forceCalculatorRef.current.calculateForcesParallel(
+                    nodePoints,
+                    quadTreeRef.current.root
+                );
 
-                    // Apply forces with damping
+                // Apply forces with damping
+                forces.forEach((force, index) => {
+                    const node = affectedNodes[index];
+                    if (node.x === undefined || node.z === undefined) return;
+                    
                     const damping = 0.9;
                     node.vx = ((node.vx || 0) + force.fx) * damping;
                     node.vz = ((node.vz || 0) + force.fy) * damping;
                     node.x += node.vx;
                     node.z += node.vz;
-                } catch (e) {
-                    console.warn('Force calculation error:', e);
-                }
-            });
+                });
+            }
 
             // Cancel any pending animation frame
             if (animationFrameRef.current) {
@@ -123,13 +156,11 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             }
 
             // Schedule next update
-            if (!isDisposingRef.current && graphRef.current) {
-                animationFrameRef.current = requestAnimationFrame(() => {
-                    if (graphRef.current) {
-                        graphRef.current.refresh();
-                    }
-                });
-            }
+            animationFrameRef.current = requestAnimationFrame(() => {
+                if (graphRef.current) {
+                    graphRef.current.refresh();
+                }
+            });
         } catch (e) {
             console.warn('Force update error:', e);
         }
@@ -159,15 +190,17 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
         }
 
         try {
-            const graph = ForceGraph3DRef.current()(containerRef.current)
+            const graph = ForceGraph3DRef.current()(containerRef.current) as unknown as ExtendedForceGraph;
+            
+            graph
                 .width(width)
                 .height(height)
                 .graphData(memoizedData)
                 .nodeColor((node: Node) => getNodeColor(node.depth))
                 .nodeLabel((node: Node) => node.id)
-                .nodeResolution(8)
                 .backgroundColor('#000000')
                 .onNodeClick((node: Node) => onNodeClick && onNodeClick(node))
+                .nodeResolution(8)
                 .onNodeDragEnd((node: Node) => {
                     updateForcesForNode(node);
                 });
@@ -181,7 +214,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
 
             return () => {
                 if (graphRef.current) {
-                    graphRef.current._destructor();
+                    graphRef.current.controls().dispose();
                 }
             };
         } catch (error) {
@@ -274,7 +307,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
                         textAlign: 'right',
                         pointerEvents: 'none'
                     }}>
-                        "A SANDHEEP RAJKUMAR PROJECT"
+                        &ldquo;A SANDHEEP RAJKUMAR PROJECT&rdquo;
                     </div>
                 </>
             )}
