@@ -6,6 +6,8 @@ import { QuadTree } from '../lib/quadtree';
 import { ForceCalculator } from '../lib/force.calculator';
 import { Space_Mono } from 'next/font/google';
 import { LoadingOverlay, LoadingState } from './LoadingOverlay';
+import { useGraphStore } from '../store/useGraphStore';
+import { useGraphInteractions } from '../hooks/useGraphInteractions';
 import type { IForceGraph3D } from '3d-force-graph';
 
 interface CachedNode extends Node {
@@ -42,7 +44,7 @@ const cleanupResources = (nodes: Node[]) => {
     });
 };
 
-const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
+const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<IForceGraph3D | null>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,11 +53,20 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
     const animationFrameRef = useRef<number>();
     const isDisposingRef = useRef<boolean>(false);
 
+    const { setNodesData, setLinksData } = useGraphStore();
+    const { handleNodeClick, highlightedConnections } = useGraphInteractions();
+
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
         theta: 0.5,
         repulsionStrength: 1,
         attractionStrength: 0.1
     }));
+
+    // Update store when data changes
+    useEffect(() => {
+        setNodesData(data.nodes);
+        setLinksData(data.links);
+    }, [data, setNodesData, setLinksData]);
 
     // Memoize data to prevent unnecessary updates
     const memoizedData = useMemo(() => data, [data]);
@@ -183,10 +194,16 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
                 .width(width)
                 .height(height)
                 .graphData(memoizedData)
-                .nodeColor((node: Node) => getNodeColor(node.depth))
+                .nodeColor((node: Node) => {
+                    // Highlight nodes in the highlightedConnections set
+                    if (highlightedConnections.has(node.id)) {
+                        return '#ff6b6b'; // Highlighted color
+                    }
+                    return getNodeColor(node.depth);
+                })
                 .nodeLabel((node: Node) => node.id)
                 .backgroundColor('#000000')
-                .onNodeClick((node: Node) => onNodeClick && onNodeClick(node))
+                .onNodeClick((node: Node, event: MouseEvent) => handleNodeClick(node, event))
                 .nodeResolution(8)
                 .onNodeDragEnd((node: Node) => {
                     updateForcesForNode(node);
@@ -209,7 +226,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data, onNodeClick }) => {
             setLoadingState(prev => ({ ...prev, graphInitializing: false }));
             return undefined;
         }
-    }, [loadingState.graphModuleLoading, width, height, memoizedData, onNodeClick, updateForcesForNode]);
+    }, [loadingState.graphModuleLoading, width, height, memoizedData, handleNodeClick, highlightedConnections, updateForcesForNode]);
 
     // Effect for handling component unmount cleanup
     useEffect(() => {

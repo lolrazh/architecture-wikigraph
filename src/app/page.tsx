@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Space_Mono } from 'next/font/google';
-import { GraphData, Node } from '../types/graph';
+import { GraphData } from '../types/graph';
 import { LoadingOverlay, LoadingState } from '../components/LoadingOverlay';
+import { useGraphStore } from '../store/useGraphStore';
 
 // Dynamically import the Graph component with no SSR
 const Graph = dynamic(() => import('../components/Graph'), {
@@ -25,6 +26,14 @@ export default function Home() {
     graphInitializing: true
   });
   const [error, setError] = useState<string | null>(null);
+  const selectedNode = useGraphStore(state => state.selectedNode);
+
+  // Handle opening Wikipedia when a node is selected
+  useEffect(() => {
+    if (selectedNode) {
+      window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(selectedNode.id)}`, '_blank');
+    }
+  }, [selectedNode]);
 
   useEffect(() => {
     // Load graph data
@@ -71,10 +80,6 @@ export default function Home() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleNodeClick = (node: Node) => {
-    window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(node.id)}`, '_blank');
-  };
-
   if (error) {
     return (
       <main className={`fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-gray-200 ${spaceMono.className}`}>
@@ -102,7 +107,6 @@ export default function Home() {
         width={dimensions.width}
         height={dimensions.height}
         data={graphData}
-        onNodeClick={handleNodeClick}
       />
     </main>
   );
