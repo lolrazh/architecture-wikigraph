@@ -2,27 +2,36 @@
   "name": "architecture-wikigraph",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev --port 3001",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate-db": "node --loader ts-node/esm scripts/migrate-to-sqlite.ts",
+    "verify-db": "node --loader ts-node/esm scripts/verify-db.ts"
   },
   "dependencies": {
     "3d-force-graph": "^1.76.1",
     "next": "^14.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "three": "^0.173.0"
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "three": "^0.173.0",
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@types/jest": "^29.5.14",
     "@types/node": "^20.11.19",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
+    "@types/sqlite3": "^5.1.0",
     "@types/three": "^0.173.0",
     "eslint": "^8.56.0",
     "eslint-config-next": "^14.1.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
 }
