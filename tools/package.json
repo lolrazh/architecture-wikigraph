@@ -1,0 +1,21 @@
+{
+  "name": "architecture-wikigraph-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate-db": "node --loader ts-node/esm migrate-to-sqlite.ts",
+    "verify-db": "node --loader ts-node/esm verify-db.ts",
+    "test-api": "node test-api.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+} 

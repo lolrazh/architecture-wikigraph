@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "migrate-db": "node --loader ts-node/esm scripts/migrate-to-sqlite.ts",
-    "verify-db": "node --loader ts-node/esm scripts/verify-db.ts"
+    "verify-db": "node --loader ts-node/esm scripts/verify-db.ts",
+    "test-api": "node scripts/test-api.js"
   },
   "dependencies": {
     "3d-force-graph": "^1.76.1",
@@ -25,12 +26,14 @@
     "@types/better-sqlite3": "^7.6.12",
     "@types/jest": "^29.5.14",
     "@types/node": "^20.11.19",
+    "@types/node-fetch": "^2.6.12",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
     "@types/sqlite3": "^5.1.0",
     "@types/three": "^0.173.0",
     "eslint": "^8.56.0",
     "eslint-config-next": "^14.1.0",
+    "node-fetch": "^3.3.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }

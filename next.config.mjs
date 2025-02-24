@@ -12,6 +12,6 @@ const nextConfig = {
     },
     // Add transpilePackages if needed
     transpilePackages: ['three', '3d-force-graph', 'force-graph'],
-}
+};
 
-module.exports = nextConfig; 
+export default nextConfig; 
