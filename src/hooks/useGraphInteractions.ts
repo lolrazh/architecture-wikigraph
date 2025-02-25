@@ -31,6 +31,7 @@ export const useGraphInteractions = () => {
   }, []);
 
   // Simplified node click handler - only handles basic selection
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleNodeClick = useCallback((node: Node, event: any) => {
     const nativeEvent = event?.srcEvent || event;
     

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { GraphState, GraphActions, Node, Link } from '../types/graph';
+import type { GraphState, GraphActions } from '../types/graph';
 
 type GraphStore = GraphState & GraphActions;
 

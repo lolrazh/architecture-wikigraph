@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { GraphProps, Node, Link } from '../types/graph';
+import { GraphProps, Node } from '../types/graph';
 import { QuadTree } from '../lib/quadtree';
 import { ForceCalculator } from '../lib/force.calculator';
 import { Space_Mono } from 'next/font/google';
@@ -49,6 +49,7 @@ const cleanupResources = (nodes: Node[]) => {
 const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<IForceGraph3D | null>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ForceGraph3DRef = useRef<any>(null);
     const quadTreeRef = useRef<QuadTree | null>(null);
     const animationFrameRef = useRef<number>();
@@ -200,6 +201,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     }, []);
 
     // Memoize the node click handler with stable reference
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleNodeClickMemoized = useCallback((node: Node, event: any) => {
         const nativeEvent = event?.srcEvent || event;
         
@@ -237,7 +239,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
                 .graphData(memoizedData)
                 .nodeColor((node: Node) => getNodeColor(node.depth))
                 .linkColor('#4b5563')
-                .linkWidth(1.5)
+                .linkWidth(1)
                 .nodeLabel((node: Node) => node.id)
                 .backgroundColor('#000000')
                 .onNodeClick(handleNodeClickMemoized)
