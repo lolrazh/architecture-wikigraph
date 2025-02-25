@@ -31,7 +31,18 @@ export default function Home() {
   // Handle opening Wikipedia when a node is selected
   useEffect(() => {
     if (selectedNode) {
-      window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(selectedNode.id)}`, '_blank');
+      try {
+        const wikiWindow = window.open(
+          `https://en.wikipedia.org/wiki/${encodeURIComponent(selectedNode.id)}`,
+          `wiki-${selectedNode.id}`, // Unique name prevents multiple windows
+          'noopener,noreferrer'
+        );
+        if (wikiWindow) {
+          wikiWindow.focus();
+        }
+      } catch (error) {
+        console.error('Failed to open Wikipedia:', error);
+      }
     }
   }, [selectedNode]);
 

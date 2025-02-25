@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { GraphProps, Node } from '../types/graph';
+import { GraphProps, Node, Link } from '../types/graph';
 import { QuadTree } from '../lib/quadtree';
 import { ForceCalculator } from '../lib/force.calculator';
 import { Space_Mono } from 'next/font/google';
@@ -9,10 +9,12 @@ import { LoadingOverlay, LoadingState } from './LoadingOverlay';
 import { useGraphStore } from '../store/useGraphStore';
 import { useGraphInteractions } from '../hooks/useGraphInteractions';
 import type { IForceGraph3D } from '3d-force-graph';
+import * as THREE from 'three';
 
 interface CachedNode extends Node {
     _force?: { x: number; y: number };
     _quadtreeRef?: QuadTree;
+    __threeObj?: THREE.Mesh;
 }
 
 const spaceMono = Space_Mono({
@@ -47,14 +49,14 @@ const cleanupResources = (nodes: Node[]) => {
 const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<IForceGraph3D | null>(null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ForceGraph3DRef = useRef<any>(null);
     const quadTreeRef = useRef<QuadTree | null>(null);
     const animationFrameRef = useRef<number>();
     const isDisposingRef = useRef<boolean>(false);
+    const previousDataRef = useRef(data);
 
     const { setNodesData, setLinksData } = useGraphStore();
-    const { handleNodeClick, highlightedConnections } = useGraphInteractions();
+    const { handleNodeClick, handleBackgroundClick } = useGraphInteractions();
 
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
         theta: 0.5,
@@ -62,14 +64,30 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         attractionStrength: 0.1
     }));
 
-    // Update store when data changes
+    // Only update store when data actually changes
     useEffect(() => {
-        setNodesData(data.nodes);
-        setLinksData(data.links);
+        if (JSON.stringify(data) !== JSON.stringify(previousDataRef.current)) {
+            setNodesData(data.nodes);
+            setLinksData(data.links);
+            previousDataRef.current = data;
+        }
     }, [data, setNodesData, setLinksData]);
 
     // Memoize data to prevent unnecessary updates
     const memoizedData = useMemo(() => data, [data]);
+
+    // Custom node object factory
+    const createNodeObject = useCallback((node: Node) => {
+        const color = getNodeColor(node.depth);
+        const material = new THREE.MeshLambertMaterial({ color });
+        const geometry = new THREE.SphereGeometry(5);
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // Store reference to the Three.js object for later manipulation
+        (node as CachedNode).__threeObj = mesh;
+        
+        return mesh;
+    }, []);
 
     // Cleanup function for QuadTree
     const cleanupQuadTree = useCallback(() => {
@@ -181,6 +199,29 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         });
     }, []);
 
+    // Memoize the node click handler with stable reference
+    const handleNodeClickMemoized = useCallback((node: Node, event: any) => {
+        const nativeEvent = event?.srcEvent || event;
+        
+        // Always prevent default for any click type
+        if (nativeEvent) {
+            nativeEvent.preventDefault();
+            nativeEvent.stopPropagation();
+            nativeEvent.stopImmediatePropagation();
+        }
+        
+        // Prevent the wrapper event too
+        if (event) {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+        }
+
+        // Use requestAnimationFrame to batch updates
+        requestAnimationFrame(() => {
+            handleNodeClick(node, event);
+        });
+    }, [handleNodeClick]);
+
     // Initialize graph when container and module are ready
     useEffect(() => {
         if (loadingState.graphModuleLoading || !containerRef.current || !ForceGraph3DRef.current) {
@@ -194,24 +235,19 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
                 .width(width)
                 .height(height)
                 .graphData(memoizedData)
-                .nodeColor((node: Node) => {
-                    // Highlight nodes in the highlightedConnections set
-                    if (highlightedConnections.has(node.id)) {
-                        return '#ff6b6b'; // Highlighted color
-                    }
-                    return getNodeColor(node.depth);
-                })
+                .nodeColor((node: Node) => getNodeColor(node.depth))
+                .linkColor('#4b5563')
+                .linkWidth(1.5)
                 .nodeLabel((node: Node) => node.id)
                 .backgroundColor('#000000')
-                .onNodeClick((node: Node, event: MouseEvent) => handleNodeClick(node, event))
+                .onNodeClick(handleNodeClickMemoized)
+                .onBackgroundClick(handleBackgroundClick)
                 .nodeResolution(8)
-                .onNodeDragEnd((node: Node) => {
-                    updateForcesForNode(node);
-                });
+                .nodeThreeObject(createNodeObject)
+                .onNodeDragEnd(updateForcesForNode);
 
             graphRef.current = graph;
             
-            // Set initializing to false after a short delay to ensure graph is rendered
             setTimeout(() => {
                 setLoadingState(prev => ({ ...prev, graphInitializing: false }));
             }, 1000);
@@ -226,7 +262,16 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
             setLoadingState(prev => ({ ...prev, graphInitializing: false }));
             return undefined;
         }
-    }, [loadingState.graphModuleLoading, width, height, memoizedData, handleNodeClick, highlightedConnections, updateForcesForNode]);
+    }, [
+        loadingState.graphModuleLoading,
+        width,
+        height,
+        memoizedData,
+        handleNodeClickMemoized,
+        handleBackgroundClick,
+        createNodeObject,
+        updateForcesForNode
+    ]);
 
     // Effect for handling component unmount cleanup
     useEffect(() => {

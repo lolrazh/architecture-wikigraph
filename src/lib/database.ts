@@ -133,43 +133,119 @@ export async function getNodeConnections(nodeId: string): Promise<GraphData> {
       ]);
       result = { nodes, links };
     } else {
-      // For other nodes, use a single optimized query
-      const data = await db.all<(Node & { link_id: number, target_id: string })[]>(`
-        WITH connected_links AS (
-          SELECT id as link_id, source, target
-          FROM links 
-          WHERE source = ? OR target = ?
-        )
+      // For other nodes, get both direct connections (depth 1) and secondary connections (depth 2)
+      // First, get all directly connected nodes
+      console.log(`Fetching depth-1 and depth-2 connections for node: ${nodeId}`);
+      
+      // Get direct connections (depth-1)
+      interface DirectConnection {
+        id: string;
+      }
+      
+      const directConnections = await db.all<DirectConnection[]>(`
         SELECT 
-          n.id, n.depth, n.category,
-          l.link_id,
           CASE 
-            WHEN l.source = n.id THEN l.target 
-            ELSE l.source 
-          END as target_id
-        FROM nodes n
-        LEFT JOIN connected_links l 
-          ON n.id = l.source OR n.id = l.target
-        WHERE n.id = ? OR l.link_id IS NOT NULL
+            WHEN source = ? THEN target
+            ELSE source 
+          END as id
+        FROM links 
+        WHERE source = ? OR target = ?
       `, [nodeId, nodeId, nodeId]);
-
-      // Transform results
-      const nodes = Array.from(new Set(data.map(row => ({
-        id: row.id,
-        depth: row.depth,
-        category: row.category
-      }))));
-
-      const links = data
-        .filter(row => row.link_id)
-        .map(row => ({
-          id: row.link_id,
-          source: nodeId,
-          target: row.target_id
-        }));
-
-      result = { nodes, links };
+      
+      const directNodeIds = directConnections.map(conn => conn.id);
+      console.log(`Found ${directNodeIds.length} direct connections`);
+      
+      // If no direct connections, return empty result
+      if (directNodeIds.length === 0) {
+        console.log('No direct connections found, returning empty result');
+        return { nodes: [], links: [] };
+      }
+      
+      // Get the nodes and their metadata including depth-2 connections
+      const nodesQuery = `
+        SELECT * 
+        FROM nodes 
+        WHERE id = ? ${directNodeIds.length > 0 ? 'OR id IN (' + directNodeIds.map(() => '?').join(',') + ')' : ''}
+      `;
+      
+      const nodes = await db.all<Node[]>(
+        nodesQuery, 
+        [nodeId, ...directNodeIds]
+      );
+      
+      console.log(`Retrieved ${nodes.length} nodes`);
+      
+      // Get all links between these nodes
+      const linksQuery = `
+        SELECT * 
+        FROM links 
+        WHERE (source = ? ${directNodeIds.length > 0 ? 'OR source IN (' + directNodeIds.map(() => '?').join(',') + ')' : ''})
+        OR (target = ? ${directNodeIds.length > 0 ? 'OR target IN (' + directNodeIds.map(() => '?').join(',') + ')' : ''})
+      `;
+      
+      const links = await db.all<Link[]>(
+        linksQuery, 
+        [nodeId, ...directNodeIds, nodeId, ...directNodeIds]
+      );
+      
+      console.log(`Retrieved ${links.length} links`);
+      
+      // Find depth-2 nodes (connected to direct connections)
+      const depth2NodeIds = new Set<string>();
+      links.forEach(link => {
+        const sourceId = link.source;
+        const targetId = link.target;
+        
+        // If source is direct connection and target is not the origin node or another direct connection
+        if (directNodeIds.includes(sourceId) && sourceId !== nodeId && targetId !== nodeId && !directNodeIds.includes(targetId)) {
+          depth2NodeIds.add(targetId);
+        }
+        
+        // If target is direct connection and source is not the origin node or another direct connection
+        if (directNodeIds.includes(targetId) && targetId !== nodeId && sourceId !== nodeId && !directNodeIds.includes(sourceId)) {
+          depth2NodeIds.add(sourceId);
+        }
+      });
+      
+      console.log(`Found ${depth2NodeIds.size} depth-2 nodes`);
+      
+      // Get depth-2 node details if any found
+      let depth2Nodes: Node[] = [];
+      if (depth2NodeIds.size > 0) {
+        const depth2Query = `
+          SELECT * 
+          FROM nodes 
+          WHERE id IN (${Array.from(depth2NodeIds).map(() => '?').join(',')})
+        `;
+        
+        depth2Nodes = await db.all<Node[]>(
+          depth2Query, 
+          Array.from(depth2NodeIds)
+        );
+        
+        console.log(`Retrieved ${depth2Nodes.length} depth-2 node details`);
+      }
+      
+      // Combine all nodes and links
+      result = { 
+        nodes: [...nodes, ...depth2Nodes],
+        links 
+      };
     }
+
+    // Mark depths explicitly
+    result.nodes.forEach(node => {
+      if (node.id === nodeId) {
+        node.depth = 0; // Origin node
+      } else if (result.links.some(link => 
+        (link.source === nodeId && link.target === node.id) || 
+        (link.target === nodeId && link.source === node.id)
+      )) {
+        node.depth = 1; // Direct connection
+      } else {
+        node.depth = 2; // Secondary connection
+      }
+    });
 
     // Cache the results
     setCachedData(nodeId, result);

@@ -21,8 +21,8 @@ export interface Node extends BaseNode {
 
 export interface Link {
   id?: number;
-  source: string;
-  target: string;
+  source: string | Node | { id: string };
+  target: string | Node | { id: string };
   depth?: number;
   loaded?: boolean;
 }
@@ -55,8 +55,11 @@ export interface GraphActions {
   addExpandedNode: (nodeId: string) => void;
   removeExpandedNode: (nodeId: string) => void;
   addHighlightedConnection: (nodeId: string) => void;
+  addHighlightedConnections: (nodeIds: string[]) => void;
   removeHighlightedConnection: (nodeId: string) => void;
   clearHighlights: () => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
-} 
+}
+
+export interface GraphStore extends GraphState, GraphActions {} 
