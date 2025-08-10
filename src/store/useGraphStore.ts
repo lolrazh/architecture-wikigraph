@@ -17,6 +17,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   // UI state
   showLabels: true,
+  labelSize: 2,
 
   // Actions
   setNodesData: (nodes) => set({ nodesData: nodes }),
@@ -37,5 +38,6 @@ export const useGraphStore = create<GraphStore>((set) => ({
   
   setError: (error) => set({ error }),
 
-  setShowLabels: (show) => set({ showLabels: show })
+  setShowLabels: (show) => set({ showLabels: show }),
+  setLabelSize: (size) => set({ labelSize: size })
 })); 

@@ -47,6 +47,7 @@ export interface GraphState {
   isLoading: boolean;
   error: string | null;
   showLabels: boolean;
+  labelSize: number;
 }
 
 export interface GraphActions {
@@ -62,6 +63,7 @@ export interface GraphActions {
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
   setShowLabels: (show: boolean) => void;
+  setLabelSize: (size: number) => void;
 }
 
 export interface GraphStore extends GraphState, GraphActions {} 

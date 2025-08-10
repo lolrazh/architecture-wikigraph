@@ -93,7 +93,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const isDisposingRef = useRef<boolean>(false);
     const previousDataRef = useRef(data);
 
-    const { setNodesData, setLinksData, showLabels } = useGraphStore();
+    const { setNodesData, setLinksData, showLabels, labelSize } = useGraphStore();
     const { handleNodeClick, handleBackgroundClick } = useGraphInteractions();
 
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
@@ -146,10 +146,10 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         const labelText = node.label || node.id;
         const label = new SpriteText(labelText);
         label.color = '#e5e7eb';
-        label.backgroundColor = 'rgba(0,0,0,0.35)';
+        label.backgroundColor = 'rgba(0,0,0,1.0)';
         label.padding = 2;
         label.borderWidth = 0;
-        label.textHeight = 2; // world units (even smaller)
+        label.textHeight = labelSize; // user-adjustable size
         label.position.set(0, shared.sphereRadius + 4, 0);
         // Opacity-based visibility to avoid flicker on mass toggles
         const labelMaterial = label.material as THREE.SpriteMaterial;
@@ -174,7 +174,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         (node as CachedNode).__threeObj = group;
 
         return group;
-    }, [shared, showLabels]);
+    }, [shared, showLabels, labelSize]);
 
     // Animate label opacity towards target to avoid flicker
     const ensureLabelAnimLoop = useCallback(() => {
@@ -456,6 +456,17 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
             }
         }
     }, [showLabels, memoizedData.nodes, setGroupLabelTargetOpacity]);
+
+    // Update label size when slider changes
+    useEffect(() => {
+        if (!memoizedData?.nodes) return;
+        memoizedData.nodes.forEach(n => {
+            const obj = (n as CachedNode).__threeObj as THREE.Group | undefined;
+            if (!obj) return;
+            const { label } = obj.userData as { label: SpriteText };
+            if (label) label.textHeight = labelSize;
+        });
+    }, [labelSize, memoizedData.nodes]);
 
     // Effect for handling component unmount cleanup
     useEffect(() => {
