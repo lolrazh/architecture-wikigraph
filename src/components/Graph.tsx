@@ -105,6 +105,10 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const hoveredNodeRef = useRef<Node | null>(null);
     const labelAnimSetRef = useRef<Set<THREE.Group>>(new Set());
     const labelAnimRAFRef = useRef<number | null>(null);
+    const showLabelsRef = useRef<boolean>(showLabels);
+    const labelSizeRef = useRef<number>(labelSize);
+    useEffect(() => { showLabelsRef.current = showLabels; }, [showLabels]);
+    useEffect(() => { labelSizeRef.current = labelSize; }, [labelSize]);
 
     // Shared resources for better performance
     const shared = useMemo(() => {
@@ -149,13 +153,13 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         label.backgroundColor = 'rgba(0,0,0,1.0)';
         label.padding = 2;
         label.borderWidth = 0;
-        label.textHeight = labelSize; // user-adjustable size
+        label.textHeight = labelSizeRef.current; // use ref to avoid reinit on change
         label.position.set(0, shared.sphereRadius + 4, 0);
         // Opacity-based visibility to avoid flicker on mass toggles
         const labelMaterial = label.material as THREE.SpriteMaterial;
         labelMaterial.transparent = true;
         labelMaterial.depthWrite = false;
-        labelMaterial.opacity = showLabels ? 1 : 0;
+        labelMaterial.opacity = showLabelsRef.current ? 1 : 0;
 
         // Halo sprite (billboard circle) - initially hidden
         const halo = new THREE.Sprite(shared.haloMaterial);
@@ -168,13 +172,13 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         group.add(sphere);
         group.add(label);
         group.add(halo);
-        group.userData = { sphere, label, halo, labelTargetOpacity: showLabels ? 1 : 0 };
+        group.userData = { sphere, label, halo, labelTargetOpacity: showLabelsRef.current ? 1 : 0 };
 
         // Store reference to the Three.js object for later manipulation
         (node as CachedNode).__threeObj = group;
 
         return group;
-    }, [shared, showLabels, labelSize]);
+    }, [shared]);
 
     // Animate label opacity towards target to avoid flicker
     const ensureLabelAnimLoop = useCallback(() => {
@@ -374,14 +378,14 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
                         const { halo, sphere } = prevGroup.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
                         halo.visible = false;
                         sphere.scale.set(1, 1, 1);
-                        if (!showLabels) setGroupLabelTargetOpacity(prevGroup, 0);
+                        if (!showLabelsRef.current) setGroupLabelTargetOpacity(prevGroup, 0);
                     }
                     if (node && (node as CachedNode).__threeObj) {
                         const group = (node as CachedNode).__threeObj as THREE.Group;
                         const { halo, sphere } = group.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
                         halo.visible = true;
                         sphere.scale.set(1.2, 1.2, 1.2);
-                        if (!showLabels) setGroupLabelTargetOpacity(group, 1);
+                        if (!showLabelsRef.current) setGroupLabelTargetOpacity(group, 1);
                     }
                     hoveredNodeRef.current = node ?? null;
                 })
@@ -436,9 +440,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         handleNodeClickMemoized,
         handleBackgroundClick,
         createNodeObject,
-        updateForcesForNode,
-        showLabels,
-        setGroupLabelTargetOpacity
+        updateForcesForNode
     ]);
 
     // Update label opacity when toggled
