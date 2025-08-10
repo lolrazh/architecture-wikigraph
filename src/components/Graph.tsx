@@ -145,7 +145,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         label.backgroundColor = 'rgba(0,0,0,0.35)';
         label.padding = 2;
         label.borderWidth = 0;
-        label.textHeight = 6; // world units
+        label.textHeight = 3; // world units (smaller)
         label.position.set(0, shared.sphereRadius + 4, 0);
 
         // Halo sprite (billboard circle) - initially hidden
