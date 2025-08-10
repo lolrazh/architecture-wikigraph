@@ -103,6 +103,8 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     }));
 
     const hoveredNodeRef = useRef<Node | null>(null);
+    const labelAnimSetRef = useRef<Set<THREE.Group>>(new Set());
+    const labelAnimRAFRef = useRef<number | null>(null);
 
     // Shared resources for better performance
     const shared = useMemo(() => {
@@ -149,7 +151,11 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         label.borderWidth = 0;
         label.textHeight = 2; // world units (even smaller)
         label.position.set(0, shared.sphereRadius + 4, 0);
-        label.visible = showLabels;
+        // Opacity-based visibility to avoid flicker on mass toggles
+        const labelMaterial = label.material as THREE.SpriteMaterial;
+        labelMaterial.transparent = true;
+        labelMaterial.depthWrite = false;
+        labelMaterial.opacity = showLabels ? 1 : 0;
 
         // Halo sprite (billboard circle) - initially hidden
         const halo = new THREE.Sprite(shared.haloMaterial);
@@ -162,13 +168,47 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         group.add(sphere);
         group.add(label);
         group.add(halo);
-        group.userData = { sphere, label, halo };
+        group.userData = { sphere, label, halo, labelTargetOpacity: showLabels ? 1 : 0 };
 
         // Store reference to the Three.js object for later manipulation
         (node as CachedNode).__threeObj = group;
 
         return group;
     }, [shared, showLabels]);
+
+    // Animate label opacity towards target to avoid flicker
+    const ensureLabelAnimLoop = useCallback(() => {
+        if (labelAnimRAFRef.current != null) return;
+        const step = () => {
+            const toRemove: THREE.Group[] = [];
+            labelAnimSetRef.current.forEach((group) => {
+                const { label, labelTargetOpacity } = group.userData as { label: SpriteText; labelTargetOpacity: number };
+                const mat = label.material as THREE.SpriteMaterial;
+                const current = mat.opacity;
+                const target = labelTargetOpacity ?? 0;
+                const diff = target - current;
+                if (Math.abs(diff) < 0.02) {
+                    mat.opacity = target;
+                    toRemove.push(group);
+                } else {
+                    mat.opacity = current + diff * 0.25; // ease
+                }
+            });
+            toRemove.forEach(g => labelAnimSetRef.current.delete(g));
+            if (labelAnimSetRef.current.size > 0) {
+                labelAnimRAFRef.current = requestAnimationFrame(step);
+            } else {
+                labelAnimRAFRef.current = null;
+            }
+        };
+        labelAnimRAFRef.current = requestAnimationFrame(step);
+    }, []);
+
+    const setGroupLabelTargetOpacity = useCallback((group: THREE.Group, target: number) => {
+        (group.userData as { labelTargetOpacity: number }).labelTargetOpacity = target;
+        labelAnimSetRef.current.add(group);
+        ensureLabelAnimLoop();
+    }, [ensureLabelAnimLoop]);
 
     // Cleanup function for QuadTree
     const cleanupQuadTree = useCallback(() => {
@@ -331,17 +371,17 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
                 .onNodeHover((node: Node | null, prevNode: Node | null) => {
                     if (prevNode && (prevNode as CachedNode).__threeObj) {
                         const prevGroup = (prevNode as CachedNode).__threeObj as THREE.Group;
-                        const { halo, sphere, label } = prevGroup.userData as { halo: THREE.Sprite; sphere: THREE.Mesh; label: SpriteText };
+                        const { halo, sphere } = prevGroup.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
                         halo.visible = false;
                         sphere.scale.set(1, 1, 1);
-                        if (!showLabels) label.visible = false;
+                        if (!showLabels) setGroupLabelTargetOpacity(prevGroup, 0);
                     }
                     if (node && (node as CachedNode).__threeObj) {
                         const group = (node as CachedNode).__threeObj as THREE.Group;
-                        const { halo, sphere, label } = group.userData as { halo: THREE.Sprite; sphere: THREE.Mesh; label: SpriteText };
+                        const { halo, sphere } = group.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
                         halo.visible = true;
                         sphere.scale.set(1.2, 1.2, 1.2);
-                        if (!showLabels) label.visible = true;
+                        if (!showLabels) setGroupLabelTargetOpacity(group, 1);
                     }
                     hoveredNodeRef.current = node ?? null;
                 })
@@ -397,27 +437,25 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         handleBackgroundClick,
         createNodeObject,
         updateForcesForNode,
-        showLabels
+        showLabels,
+        setGroupLabelTargetOpacity
     ]);
 
-    // Update label visibility when toggled
+    // Update label opacity when toggled
     useEffect(() => {
         if (!memoizedData?.nodes) return;
         memoizedData.nodes.forEach(n => {
             const obj = (n as CachedNode).__threeObj as THREE.Group | undefined;
             if (!obj) return;
-            const { label } = obj.userData as { label?: SpriteText };
-            if (label) label.visible = showLabels;
+            setGroupLabelTargetOpacity(obj, showLabels ? 1 : 0);
         });
         if (!showLabels && hoveredNodeRef.current) {
             const obj = (hoveredNodeRef.current as CachedNode).__threeObj as THREE.Group | undefined;
             if (obj) {
-                const { label } = obj.userData as { label?: SpriteText };
-                if (label) label.visible = true;
+                setGroupLabelTargetOpacity(obj, 1);
             }
         }
-        graphRef.current?.refresh?.();
-    }, [showLabels, memoizedData.nodes]);
+    }, [showLabels, memoizedData.nodes, setGroupLabelTargetOpacity]);
 
     // Effect for handling component unmount cleanup
     useEffect(() => {
@@ -451,6 +489,8 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
             shared.sphereGeometry.dispose();
             shared.haloTexture.dispose();
             shared.haloMaterial.dispose();
+
+            if (labelAnimRAFRef.current) cancelAnimationFrame(labelAnimRAFRef.current);
 
             // Cleanup force calculator last
             if (forceCalculator) {
