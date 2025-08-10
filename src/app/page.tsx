@@ -6,6 +6,7 @@ import { Space_Mono } from 'next/font/google';
 import { GraphData } from '../types/graph';
 import { LoadingOverlay, LoadingState } from '../components/LoadingOverlay';
 import { useGraphStore } from '../store/useGraphStore';
+import ControlsPanel from '../components/ControlsPanel';
 
 // Dynamically import the Graph component with no SSR
 const Graph = dynamic(() => import('../components/Graph'), {
@@ -119,6 +120,7 @@ export default function Home() {
         height={dimensions.height}
         data={graphData}
       />
+      <ControlsPanel />
     </main>
   );
 } 

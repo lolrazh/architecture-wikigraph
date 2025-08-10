@@ -10,11 +10,12 @@ import { useGraphStore } from '../store/useGraphStore';
 import { useGraphInteractions } from '../hooks/useGraphInteractions';
 import type { IForceGraph3D } from '3d-force-graph';
 import * as THREE from 'three';
+import SpriteText from 'three-spritetext';
 
 interface CachedNode extends Node {
     _force?: { x: number; y: number };
     _quadtreeRef?: QuadTree;
-    __threeObj?: THREE.Mesh;
+    __threeObj?: THREE.Object3D;
 }
 
 const spaceMono = Space_Mono({
@@ -36,15 +37,51 @@ function getNodeColor(depth: number): string {
 const cleanupResources = (nodes: Node[]) => {
     nodes.forEach(node => {
         const cachedNode = node as CachedNode;
-        // Clear velocity vectors
         node.vx = undefined;
         node.vz = undefined;
-        
-        // Clear any cached calculations
         delete cachedNode._force;
         delete cachedNode._quadtreeRef;
     });
 };
+
+// Create a reusable halo texture (billboarded ring facing the camera)
+function createHaloTexture(): THREE.CanvasTexture {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    ctx.clearRect(0, 0, size, size);
+
+    const center = size / 2;
+    const outerRadius = size * 0.45;
+    const innerRadius = size * 0.32;
+
+    // Outer glow
+    const gradient = ctx.createRadialGradient(center, center, innerRadius, center, center, outerRadius);
+    gradient.addColorStop(0, 'rgba(173, 216, 230, 0.0)');
+    gradient.addColorStop(0.7, 'rgba(173, 216, 230, 0.25)');
+    gradient.addColorStop(1, 'rgba(173, 216, 230, 0.0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(center, center, outerRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ring stroke
+    ctx.lineWidth = size * 0.04;
+    ctx.strokeStyle = 'rgba(173, 216, 230, 0.75)';
+    ctx.beginPath();
+    ctx.arc(center, center, (outerRadius + innerRadius) / 2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+}
 
 const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +93,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const isDisposingRef = useRef<boolean>(false);
     const previousDataRef = useRef(data);
 
-    const { setNodesData, setLinksData } = useGraphStore();
+    const { setNodesData, setLinksData, showLabels, labelSize } = useGraphStore();
     const { handleNodeClick, handleBackgroundClick } = useGraphInteractions();
 
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
@@ -64,6 +101,24 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         repulsionStrength: 1,
         attractionStrength: 0.1
     }));
+
+    const hoveredNodeRef = useRef<Node | null>(null);
+    const labelAnimSetRef = useRef<Set<THREE.Group>>(new Set());
+    const labelAnimRAFRef = useRef<number | null>(null);
+    const showLabelsRef = useRef<boolean>(showLabels);
+    const labelSizeRef = useRef<number>(labelSize);
+    useEffect(() => { showLabelsRef.current = showLabels; }, [showLabels]);
+    useEffect(() => { labelSizeRef.current = labelSize; }, [labelSize]);
+
+    // Shared resources for better performance
+    const shared = useMemo(() => {
+        const sphereRadius = 3;
+        const sphereGeometry = new THREE.SphereGeometry(sphereRadius, 16, 16);
+        const materialsByDepth = new Map<number, THREE.MeshLambertMaterial>();
+        const haloTexture = createHaloTexture();
+        const haloMaterial = new THREE.SpriteMaterial({ map: haloTexture, transparent: true, depthWrite: false, opacity: 0.9 });
+        return { sphereRadius, sphereGeometry, materialsByDepth, haloTexture, haloMaterial };
+    }, []);
 
     // Only update store when data actually changes
     useEffect(() => {
@@ -80,15 +135,84 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     // Custom node object factory
     const createNodeObject = useCallback((node: Node) => {
         const color = getNodeColor(node.depth);
-        const material = new THREE.MeshLambertMaterial({ color });
-        const geometry = new THREE.SphereGeometry(5);
-        const mesh = new THREE.Mesh(geometry, material);
-        
+
+        let material = shared.materialsByDepth.get(node.depth);
+        if (!material) {
+            material = new THREE.MeshLambertMaterial({ color });
+            shared.materialsByDepth.set(node.depth, material);
+        }
+
+        const sphere = new THREE.Mesh(shared.sphereGeometry, material);
+        sphere.castShadow = false;
+        sphere.receiveShadow = false;
+
+        // Label sprite
+        const labelText = node.label || node.id;
+        const label = new SpriteText(labelText);
+        label.color = '#e5e7eb';
+        label.backgroundColor = 'rgba(0,0,0,1.0)';
+        label.padding = 2;
+        label.borderWidth = 0;
+        label.textHeight = labelSizeRef.current; // use ref to avoid reinit on change
+        label.position.set(0, shared.sphereRadius + 4, 0);
+        // Opacity-based visibility to avoid flicker on mass toggles
+        const labelMaterial = label.material as THREE.SpriteMaterial;
+        labelMaterial.transparent = true;
+        labelMaterial.depthWrite = false;
+        labelMaterial.opacity = showLabelsRef.current ? 1 : 0;
+
+        // Halo sprite (billboard circle) - initially hidden
+        const halo = new THREE.Sprite(shared.haloMaterial);
+        const haloScale = shared.sphereRadius * 3.2;
+        halo.scale.set(haloScale, haloScale, 1);
+        halo.visible = false;
+
+        // Group them together
+        const group = new THREE.Group();
+        group.add(sphere);
+        group.add(label);
+        group.add(halo);
+        group.userData = { sphere, label, halo, labelTargetOpacity: showLabelsRef.current ? 1 : 0 };
+
         // Store reference to the Three.js object for later manipulation
-        (node as CachedNode).__threeObj = mesh;
-        
-        return mesh;
+        (node as CachedNode).__threeObj = group;
+
+        return group;
+    }, [shared]);
+
+    // Animate label opacity towards target to avoid flicker
+    const ensureLabelAnimLoop = useCallback(() => {
+        if (labelAnimRAFRef.current != null) return;
+        const step = () => {
+            const toRemove: THREE.Group[] = [];
+            labelAnimSetRef.current.forEach((group) => {
+                const { label, labelTargetOpacity } = group.userData as { label: SpriteText; labelTargetOpacity: number };
+                const mat = label.material as THREE.SpriteMaterial;
+                const current = mat.opacity;
+                const target = labelTargetOpacity ?? 0;
+                const diff = target - current;
+                if (Math.abs(diff) < 0.02) {
+                    mat.opacity = target;
+                    toRemove.push(group);
+                } else {
+                    mat.opacity = current + diff * 0.25; // ease
+                }
+            });
+            toRemove.forEach(g => labelAnimSetRef.current.delete(g));
+            if (labelAnimSetRef.current.size > 0) {
+                labelAnimRAFRef.current = requestAnimationFrame(step);
+            } else {
+                labelAnimRAFRef.current = null;
+            }
+        };
+        labelAnimRAFRef.current = requestAnimationFrame(step);
     }, []);
+
+    const setGroupLabelTargetOpacity = useCallback((group: THREE.Group, target: number) => {
+        (group.userData as { labelTargetOpacity: number }).labelTargetOpacity = target;
+        labelAnimSetRef.current.add(group);
+        ensureLabelAnimLoop();
+    }, [ensureLabelAnimLoop]);
 
     // Cleanup function for QuadTree
     const cleanupQuadTree = useCallback(() => {
@@ -232,27 +356,71 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
 
         try {
             const graph = ForceGraph3DRef.current()(containerRef.current);
-            
+
             graph
                 .width(width)
                 .height(height)
                 .graphData(memoizedData)
                 .nodeColor((node: Node) => getNodeColor(node.depth))
                 .linkColor('#4b5563')
-                .linkWidth(1)
-                .nodeLabel((node: Node) => node.id)
+                .linkOpacity(0.35)
+                .linkWidth(0.5)
+                // .nodeLabel removed in favor of always-on SpriteText labels
                 .backgroundColor('#000000')
                 .onNodeClick(handleNodeClickMemoized)
                 .onBackgroundClick(handleBackgroundClick)
                 .nodeResolution(8)
                 .nodeThreeObject(createNodeObject)
-                .onNodeDragEnd(updateForcesForNode);
+                .onNodeDragEnd(updateForcesForNode)
+                .onNodeHover((node: Node | null, prevNode: Node | null) => {
+                    if (prevNode && (prevNode as CachedNode).__threeObj) {
+                        const prevGroup = (prevNode as CachedNode).__threeObj as THREE.Group;
+                        const { halo, sphere } = prevGroup.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
+                        halo.visible = false;
+                        sphere.scale.set(1, 1, 1);
+                        if (!showLabelsRef.current) setGroupLabelTargetOpacity(prevGroup, 0);
+                    }
+                    if (node && (node as CachedNode).__threeObj) {
+                        const group = (node as CachedNode).__threeObj as THREE.Group;
+                        const { halo, sphere } = group.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
+                        halo.visible = true;
+                        sphere.scale.set(1.2, 1.2, 1.2);
+                        if (!showLabelsRef.current) setGroupLabelTargetOpacity(group, 1);
+                    }
+                    hoveredNodeRef.current = node ?? null;
+                })
+                .showNavInfo(false);
+
+            // Renderer/controls optimizations
+            try {
+                const renderer = (graph as unknown as IForceGraph3D).renderer?.();
+                if (renderer) {
+                    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+                    renderer.outputColorSpace = THREE.SRGBColorSpace;
+                    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                }
+                const controls = (graph as unknown as IForceGraph3D).controls?.();
+                if (controls) {
+                    // @ts-expect-error: runtime controls from 3d-force-graph expose these
+                    controls.enableDamping = true;
+                    // @ts-expect-error: runtime controls from 3d-force-graph expose these
+                    controls.dampingFactor = 0.08;
+                    // @ts-expect-error: runtime controls from 3d-force-graph expose these
+                    controls.rotateSpeed = 0.8;
+                    // @ts-expect-error: runtime controls from 3d-force-graph expose these
+                    controls.zoomSpeed = 0.9;
+                    // @ts-expect-error: runtime controls from 3d-force-graph expose these
+                    controls.panSpeed = 0.8;
+                }
+            } catch {
+                // noop
+            }
 
             graphRef.current = graph;
-            
+
             setTimeout(() => {
                 setLoadingState(prev => ({ ...prev, graphInitializing: false }));
-            }, 1000);
+            }, 600);
 
             return () => {
                 if (graphRef.current) {
@@ -275,11 +443,38 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         updateForcesForNode
     ]);
 
+    // Update label opacity when toggled
+    useEffect(() => {
+        if (!memoizedData?.nodes) return;
+        memoizedData.nodes.forEach(n => {
+            const obj = (n as CachedNode).__threeObj as THREE.Group | undefined;
+            if (!obj) return;
+            setGroupLabelTargetOpacity(obj, showLabels ? 1 : 0);
+        });
+        if (!showLabels && hoveredNodeRef.current) {
+            const obj = (hoveredNodeRef.current as CachedNode).__threeObj as THREE.Group | undefined;
+            if (obj) {
+                setGroupLabelTargetOpacity(obj, 1);
+            }
+        }
+    }, [showLabels, memoizedData.nodes, setGroupLabelTargetOpacity]);
+
+    // Update label size when slider changes
+    useEffect(() => {
+        if (!memoizedData?.nodes) return;
+        memoizedData.nodes.forEach(n => {
+            const obj = (n as CachedNode).__threeObj as THREE.Group | undefined;
+            if (!obj) return;
+            const { label } = obj.userData as { label: SpriteText };
+            if (label) label.textHeight = labelSize;
+        });
+    }, [labelSize, memoizedData.nodes]);
+
     // Effect for handling component unmount cleanup
     useEffect(() => {
         // Store reference to force calculator that will be cleaned up
         const forceCalculator = forceCalculatorRef.current;
-        
+
         return () => {
             isDisposingRef.current = true;
 
@@ -303,12 +498,19 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
                 graphRef.current = null;
             }
 
+            // Dispose shared resources
+            shared.sphereGeometry.dispose();
+            shared.haloTexture.dispose();
+            shared.haloMaterial.dispose();
+
+            if (labelAnimRAFRef.current) cancelAnimationFrame(labelAnimRAFRef.current);
+
             // Cleanup force calculator last
             if (forceCalculator) {
                 forceCalculator.dispose();
             }
         };
-    }, [cleanupQuadTree, memoizedData.nodes]);
+    }, [cleanupQuadTree, memoizedData.nodes, shared]);
 
     return (
         <div className={spaceMono.className}>

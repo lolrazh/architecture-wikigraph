@@ -1,4 +1,5 @@
 import { Node, Link } from './graph';
+import type { WebGLRenderer } from 'three';
 
 declare module '3d-force-graph' {
   // Base types for nodes and links with required 3D force graph properties
@@ -48,6 +49,7 @@ declare module '3d-force-graph' {
     nodeColor(fn: (node: NodeType) => string): this;
     nodeVal(fn: (node: NodeType) => number): this;
     nodeLabel(fn: (node: NodeType) => string): this;
+    linkColor(color: string): this;
     linkColor(fn: (link: LinkType) => string): this;
     linkOpacity(opacity: number): this;
     linkWidth(width: number): this;
@@ -57,11 +59,15 @@ declare module '3d-force-graph' {
     d3Force(name: 'collide', force: D3ForceCollide | null): this;
     d3Force(name: string, force: unknown): this;
     onNodeClick(fn: (node: NodeType) => void): this;
+    onBackgroundClick(fn: () => void): this;
+    onNodeHover(fn: (node: NodeType | null, prevNode: NodeType | null) => void): this;
+    showNavInfo(show: boolean): this;
     graphData(data: { nodes: NodeType[]; links: LinkType[] }): this;
     tickFrame(): void;
     _destructor(): void;
     refresh(): void;
     controls(): Controls;
+    renderer(): WebGLRenderer;
     nodeResolution(resolution: number): this;
     onNodeDragEnd(fn: (node: NodeType) => void): this;
   }
