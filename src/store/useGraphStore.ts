@@ -15,6 +15,9 @@ export const useGraphStore = create<GraphStore>((set) => ({
   expandedNodes: new Set<string>(),
   highlightedConnections: new Set<string>(),
 
+  // UI state
+  showLabels: true,
+
   // Actions
   setNodesData: (nodes) => set({ nodesData: nodes }),
   
@@ -32,5 +35,7 @@ export const useGraphStore = create<GraphStore>((set) => ({
   
   setLoading: (isLoading) => set({ isLoading }),
   
-  setError: (error) => set({ error })
+  setError: (error) => set({ error }),
+
+  setShowLabels: (show) => set({ showLabels: show })
 })); 

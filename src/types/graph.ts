@@ -46,6 +46,7 @@ export interface GraphState {
   highlightedConnections: Set<string>;
   isLoading: boolean;
   error: string | null;
+  showLabels: boolean;
 }
 
 export interface GraphActions {
@@ -60,6 +61,7 @@ export interface GraphActions {
   clearHighlights: () => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
+  setShowLabels: (show: boolean) => void;
 }
 
 export interface GraphStore extends GraphState, GraphActions {} 

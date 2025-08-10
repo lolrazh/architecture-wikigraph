@@ -93,7 +93,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
     const isDisposingRef = useRef<boolean>(false);
     const previousDataRef = useRef(data);
 
-    const { setNodesData, setLinksData } = useGraphStore();
+    const { setNodesData, setLinksData, showLabels } = useGraphStore();
     const { handleNodeClick, handleBackgroundClick } = useGraphInteractions();
 
     const forceCalculatorRef = useRef<ForceCalculator>(new ForceCalculator({
@@ -101,6 +101,8 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         repulsionStrength: 1,
         attractionStrength: 0.1
     }));
+
+    const hoveredNodeRef = useRef<Node | null>(null);
 
     // Shared resources for better performance
     const shared = useMemo(() => {
@@ -145,8 +147,9 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         label.backgroundColor = 'rgba(0,0,0,0.35)';
         label.padding = 2;
         label.borderWidth = 0;
-        label.textHeight = 3; // world units (smaller)
+        label.textHeight = 2; // world units (even smaller)
         label.position.set(0, shared.sphereRadius + 4, 0);
+        label.visible = showLabels;
 
         // Halo sprite (billboard circle) - initially hidden
         const halo = new THREE.Sprite(shared.haloMaterial);
@@ -165,7 +168,7 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         (node as CachedNode).__threeObj = group;
 
         return group;
-    }, [shared]);
+    }, [shared, showLabels]);
 
     // Cleanup function for QuadTree
     const cleanupQuadTree = useCallback(() => {
@@ -328,16 +331,19 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
                 .onNodeHover((node: Node | null, prevNode: Node | null) => {
                     if (prevNode && (prevNode as CachedNode).__threeObj) {
                         const prevGroup = (prevNode as CachedNode).__threeObj as THREE.Group;
-                        const { halo, sphere } = prevGroup.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
+                        const { halo, sphere, label } = prevGroup.userData as { halo: THREE.Sprite; sphere: THREE.Mesh; label: SpriteText };
                         halo.visible = false;
                         sphere.scale.set(1, 1, 1);
+                        if (!showLabels) label.visible = false;
                     }
                     if (node && (node as CachedNode).__threeObj) {
                         const group = (node as CachedNode).__threeObj as THREE.Group;
-                        const { halo, sphere } = group.userData as { halo: THREE.Sprite; sphere: THREE.Mesh };
+                        const { halo, sphere, label } = group.userData as { halo: THREE.Sprite; sphere: THREE.Mesh; label: SpriteText };
                         halo.visible = true;
                         sphere.scale.set(1.2, 1.2, 1.2);
+                        if (!showLabels) label.visible = true;
                     }
+                    hoveredNodeRef.current = node ?? null;
                 })
                 .showNavInfo(false);
 
@@ -390,8 +396,28 @@ const Graph: React.FC<GraphProps> = ({ width, height, data }) => {
         handleNodeClickMemoized,
         handleBackgroundClick,
         createNodeObject,
-        updateForcesForNode
+        updateForcesForNode,
+        showLabels
     ]);
+
+    // Update label visibility when toggled
+    useEffect(() => {
+        if (!memoizedData?.nodes) return;
+        memoizedData.nodes.forEach(n => {
+            const obj = (n as CachedNode).__threeObj as THREE.Group | undefined;
+            if (!obj) return;
+            const { label } = obj.userData as { label?: SpriteText };
+            if (label) label.visible = showLabels;
+        });
+        if (!showLabels && hoveredNodeRef.current) {
+            const obj = (hoveredNodeRef.current as CachedNode).__threeObj as THREE.Group | undefined;
+            if (obj) {
+                const { label } = obj.userData as { label?: SpriteText };
+                if (label) label.visible = true;
+            }
+        }
+        graphRef.current?.refresh?.();
+    }, [showLabels, memoizedData.nodes]);
 
     // Effect for handling component unmount cleanup
     useEffect(() => {
